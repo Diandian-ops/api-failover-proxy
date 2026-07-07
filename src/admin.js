@@ -10,7 +10,7 @@ import {
   toggleUpstream,
   getDbPath
 } from './upstream-pool.js'
-import { getSyncStatus, syncClaudeSettings, restoreClaudeSettings } from './sync-claude-settings.js'
+import { detectAllPlatforms, syncPlatform, restorePlatform, getSyncStatus, syncClaudeSettings, restoreClaudeSettings } from './sync-client-config.js'
 
 const router = Router()
 
@@ -159,6 +159,37 @@ router.post('/claude-sync', (req, res) => {
     }
     log.info(`[admin] Claude Code 同步 ${action} 完成`)
     res.json({ ok: true, action, ...result })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 多平台客户端配置同步
+// 查询所有平台状态：GET /admin/client-config
+// 单平台操作：POST /admin/client-config/:platform { action: 'sync' | 'restore' }
+router.get('/client-config', (req, res) => {
+  try {
+    const platforms = detectAllPlatforms(req.app.locals.config)
+    res.json({ ok: true, platforms })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+router.post('/client-config/:platform', (req, res) => {
+  const action = req.body?.action
+  if (!['sync', 'restore'].includes(action)) {
+    return res.status(400).json({ error: { message: "action 必须是 'sync' 或 'restore'" } })
+  }
+  try {
+    const result = action === 'sync'
+      ? syncPlatform(req.params.platform, req.app.locals.config)
+      : restorePlatform(req.params.platform)
+    if (!result.ok) {
+      return res.status(400).json({ error: { message: result.error } })
+    }
+    log.info(`[admin] ${req.params.platform} 同步 ${action} 完成`)
+    res.json({ ok: true, platform: req.params.platform, action, ...result })
   } catch (e) {
     res.status(500).json({ error: { message: e.message } })
   }
