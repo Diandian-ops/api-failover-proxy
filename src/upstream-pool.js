@@ -115,6 +115,45 @@ export function deleteUpstream(name) {
   db.prepare('DELETE FROM upstreams WHERE name = ?').run(name)
 }
 
+// 批量新增/覆盖（事务，任一条落盘失败 → 整批回滚）
+// 字段校验由调用方（admin 层）预检，这里只负责原子落盘
+export function upsertUpstreamsBatch(list) {
+  if (!db) initPool()
+  const tx = db.transaction((items) => {
+    for (const u of items) upsertUpstream(u)
+  })
+  tx(list)
+}
+
+// 校验并规范化单条上游输入（admin 批量接口与 CLI 脚本共用，避免校验逻辑重复）
+// 返回 { ok: true, upstream } 或 { ok: false, msg }
+export function validateUpstream(b) {
+  if (!b || typeof b !== 'object') return { ok: false, msg: '条目非对象' }
+  const missing = []
+  if (!b.name) missing.push('name')
+  if (!b.type) missing.push('type')
+  if (!b.base) missing.push('base')
+  if (!b.apiKey) missing.push('apiKey')
+  if (b.type && !['openai', 'anthropic'].includes(b.type)) missing.push(`type 非法(${b.type})`)
+  if (missing.length) return { ok: false, msg: '缺少/非法: ' + missing.join(', ') }
+  return {
+    ok: true,
+    upstream: {
+      name: b.name,
+      type: b.type,
+      base: b.base,
+      apiKey: b.apiKey,
+      weight: b.weight || 1,
+      forceStream: !!b.forceStream,
+      enabled: b.enabled !== false,
+      priority: b.priority ?? 100,
+      sameRetries: b.sameRetries ?? 2,
+      sameRetryBackoffMs: b.sameRetryBackoffMs ?? 800,
+      modelMap: b.modelMap || {}
+    }
+  }
+}
+
 export function toggleUpstream(name, enabled) {
   if (!db) initPool()
   db.prepare('UPDATE upstreams SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name)

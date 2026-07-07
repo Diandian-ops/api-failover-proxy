@@ -45,6 +45,14 @@
   .api-key-cell { font-family: "SF Mono", monospace; font-size: 12px; color: #6b7280; }
   .model-map-cell { font-family: "SF Mono", monospace; font-size: 11px; color: #6b7280; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { text-align: center; padding: 40px; color: #9ca3af; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+  .tab { padding: 8px 16px; cursor: pointer; font-size: 14px; color: #6b7280; border-bottom: 2px solid transparent; }
+  .tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+  .tab-pane { margin-top: 8px; }
+  .import-ta { width: 100%; font-family: "SF Mono", monospace; font-size: 12px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+  .preview-wrap { max-height: 240px; overflow: auto; margin-top: 4px; }
+  .err-box { color: #dc2626; font-size: 13px; margin-top: 8px; }
+  .hint a { color: #2563eb; cursor: pointer; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -54,6 +62,7 @@
 <div class="card">
   <div class="actions">
     <button class="btn-primary" onclick="openAddModal()">+ 新增上游</button>
+    <button class="btn-primary" onclick="openImportModal()">📥 批量导入</button>
     <button class="btn-success" onclick="reloadPool()">⟳ 热加载</button>
     <button class="btn-secondary" onclick="loadUpstreams()">刷新列表</button>
   </div>
@@ -136,6 +145,37 @@
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal()">取消</button>
       <button class="btn-primary" onclick="saveUpstream()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量导入模态框 -->
+<div class="modal-overlay" id="import-modal">
+  <div class="modal" style="width:680px">
+    <h2>📥 批量导入上游</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="json" onclick="switchImportTab('json')">JSON</div>
+      <div class="tab" data-tab="csv" onclick="switchImportTab('csv')">CSV</div>
+    </div>
+
+    <div class="tab-pane" id="pane-json">
+      <textarea id="import-json" rows="9" class="import-ta" placeholder='[{"name":"upstream1","type":"anthropic","base":"https://api1.example.com/v1","apiKey":"sk-key1","priority":100,"modelMap":{"claude-3-5-sonnet":"model-a"}}]'></textarea>
+      <div class="hint" style="margin-top:4px">JSON 数组，字段同单条新增；同名上游会被覆盖。必填：name / type / base / apiKey</div>
+    </div>
+
+    <div class="tab-pane" id="pane-csv" style="display:none">
+      <input type="file" accept=".csv,.txt" id="import-file" onchange="loadCsvFile(event)" style="font-size:12px;margin-bottom:8px">
+      <textarea id="import-csv" rows="9" class="import-ta" placeholder="name,type,base,apiKey,weight,forceStream,enabled,priority,sameRetries,sameRetryBackoffMs,modelMap"></textarea>
+      <div class="hint" style="margin-top:4px">首行为表头；必填 name/type/base/apiKey，可选列可省略（用默认值）；modelMap 列填 JSON 字符串，双引号转义为两遍。 <span onclick="fillCsvTemplate()" style="color:#2563eb;cursor:pointer;text-decoration:underline">填入示例</span></div>
+    </div>
+
+    <div id="import-preview" style="margin-top:12px"></div>
+    <div id="import-errors"></div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeImportModal()">取消</button>
+      <button class="btn-warning" onclick="previewImport()">预览</button>
+      <button class="btn-primary" onclick="doImport()">导入</button>
     </div>
   </div>
 </div>
@@ -379,6 +419,141 @@ async function clientSync(platform, action) {
   } catch (e) {
     toast(`${label}失败: ` + e.message, 'error');
   }
+}
+
+// ===== 批量导入 =====
+function openImportModal() {
+  document.getElementById('import-preview').innerHTML = '';
+  document.getElementById('import-errors').innerHTML = '';
+  document.getElementById('import-modal').classList.add('show');
+}
+function closeImportModal() {
+  document.getElementById('import-modal').classList.remove('show');
+}
+function switchImportTab(t) {
+  document.querySelectorAll('#import-modal .tab').forEach(el => el.classList.toggle('active', el.dataset.tab === t));
+  document.getElementById('pane-json').style.display = t === 'json' ? 'block' : 'none';
+  document.getElementById('pane-csv').style.display = t === 'csv' ? 'block' : 'none';
+}
+// RFC4180 CSV 解析：支持引号转义（字段含逗号/换行/双引号转义为两遍）
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') {}
+      else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  while (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0].trim() === '') rows.pop();
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1).map(r => {
+    const o = {};
+    headers.forEach((h, i) => { o[h] = r[i] !== undefined ? r[i] : ''; });
+    return o;
+  });
+}
+function csvToBool(s) { s = (s || '').trim().toLowerCase(); return s === 'true' || s === '1' || s === 'yes'; }
+function csvToNum(s, d) { const v = parseInt((s || '').trim(), 10); return isNaN(v) ? d : v; }
+function csvRowToUpstream(r) {
+  let modelMap = {};
+  const mm = (r.modelMap || '').trim();
+  if (mm) { try { modelMap = JSON.parse(mm); } catch {} }
+  const enabledRaw = (r.enabled === undefined ? '' : r.enabled).toString().trim();
+  return {
+    name: (r.name || '').trim(),
+    type: (r.type || '').trim(),
+    base: (r.base || '').trim(),
+    apiKey: (r.apiKey || '').trim(),
+    weight: csvToNum(r.weight, 1),
+    forceStream: csvToBool(r.forceStream),
+    enabled: enabledRaw === '' ? true : csvToBool(enabledRaw),
+    priority: csvToNum(r.priority, 100),
+    sameRetries: csvToNum(r.sameRetries, 2),
+    sameRetryBackoffMs: csvToNum(r.sameRetryBackoffMs, 800),
+    modelMap
+  };
+}
+function parseImportInput() {
+  const tab = document.querySelector('#import-modal .tab.active').dataset.tab;
+  if (tab === 'json') {
+    const txt = document.getElementById('import-json').value.trim();
+    if (!txt) return { list: [], err: 'JSON 为空' };
+    try {
+      const arr = JSON.parse(txt);
+      if (!Array.isArray(arr)) return { list: [], err: 'JSON 需为数组' };
+      return { list: arr };
+    } catch (e) { return { list: [], err: 'JSON 解析失败: ' + e.message }; }
+  }
+  const txt = document.getElementById('import-csv').value.trim();
+  if (!txt) return { list: [], err: 'CSV 为空' };
+  const rows = parseCSV(txt);
+  if (!rows.length) return { list: [], err: 'CSV 无数据行' };
+  return { list: rows.map(csvRowToUpstream) };
+}
+function renderImportErrors(msg, errors) {
+  let html = `<div class="err-box">❌ ${esc(msg)}</div>`;
+  if (errors && errors.length) {
+    html += '<div class="preview-wrap"><table style="font-size:12px"><thead><tr><th>行</th><th>名称</th><th>错误</th></tr></thead><tbody>';
+    errors.forEach(e => { html += `<tr><td>${e.index}</td><td>${esc(String(e.name))}</td><td>${esc(e.msg)}</td></tr>`; });
+    html += '</tbody></table></div>';
+  }
+  document.getElementById('import-errors').innerHTML = html;
+}
+function previewImport() {
+  document.getElementById('import-errors').innerHTML = '';
+  const { list, err } = parseImportInput();
+  if (err) { renderImportErrors(err); return; }
+  if (!list.length) { renderImportErrors('无数据'); return; }
+  let html = `<div class="hint">将导入 ${list.length} 条：</div><div class="preview-wrap"><table style="font-size:12px"><thead><tr><th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>启用</th><th>forceStream</th><th>Base</th></tr></thead><tbody>`;
+  list.forEach((u, i) => {
+    html += `<tr><td>${i+1}</td><td><strong>${esc(String(u.name))}</strong></td><td>${esc(u.type)}</td><td>${u.priority}</td><td>${u.weight}</td><td>${u.enabled?'是':'否'}</td><td>${u.forceStream?'是':'否'}</td><td style="font-size:11px">${esc(u.base)}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+  document.getElementById('import-preview').innerHTML = html;
+}
+async function doImport() {
+  document.getElementById('import-errors').innerHTML = '';
+  const { list, err } = parseImportInput();
+  if (err) { renderImportErrors(err); return; }
+  if (!list.length) return;
+  if (!confirm(`确认导入 ${list.length} 条上游？同名将被覆盖。`)) return;
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/batch`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ upstreams: list })
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      renderImportErrors(d.error?.message || '导入失败', d.errors);
+      return;
+    }
+    toast(`导入成功 ${d.imported} 条，热加载${d.reloaded ? '完成' : '已跳过'}`);
+    closeImportModal();
+    _upstreamsCache = [];
+    loadUpstreams();
+  } catch (e) {
+    renderImportErrors(e.message);
+  }
+}
+function loadCsvFile(ev) {
+  const f = ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById('import-csv').value = reader.result; };
+  reader.readAsText(f);
+}
+function fillCsvTemplate() {
+  document.getElementById('import-csv').value = 'name,type,base,apiKey,weight,forceStream,enabled,priority,sameRetries,sameRetryBackoffMs,modelMap\nupstream1,anthropic,https://api1.example.com/v1,sk-key1,1,false,true,100,2,800,"{""claude-3-5-sonnet"":""model-a""}"\nupstream2,openai,https://api2.example.com/v1,sk-key2,3,true,true,100,2,800,';
 }
 </script>
 </body>

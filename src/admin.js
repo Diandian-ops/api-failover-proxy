@@ -6,6 +6,8 @@ import {
   loadUpstreams,
   loadAllUpstreams,
   upsertUpstream,
+  upsertUpstreamsBatch,
+  validateUpstream,
   deleteUpstream,
   toggleUpstream,
   getDbPath
@@ -87,6 +89,48 @@ router.post('/upstreams', (req, res) => {
       ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
     })
   } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 批量新增/覆盖上游（事务，任一校验失败整批拒绝，不部分导入）
+// body: { upstreams: [{ name, type, base, apiKey, weight?, forceStream?, enabled?, priority?, sameRetries?, sameRetryBackoffMs?, modelMap? }] }
+//      或直接传数组 [...]
+router.post('/upstreams/batch', (req, res) => {
+  let list = Array.isArray(req.body) ? req.body : req.body?.upstreams
+  if (!Array.isArray(list) || list.length === 0) {
+    return res.status(400).json({ error: { message: 'body 需为 { upstreams: [...] } 或顶层数组，且非空' } })
+  }
+  // 预检：逐条校验必填字段，收集错误（不落盘）
+  const errors = []
+  const valid = []
+  list.forEach((b, i) => {
+    const v = validateUpstream(b)
+    if (!v.ok) errors.push({ index: i, name: (b && b.name) || '(空)', msg: v.msg })
+    else valid.push(v.upstream)
+  })
+  if (errors.length) {
+    return res.status(400).json({
+      ok: false,
+      error: { message: `${errors.length}/${list.length} 条校验失败，已拒绝整批导入` },
+      errors,
+      validCount: valid.length,
+      totalCount: list.length
+    })
+  }
+  try {
+    upsertUpstreamsBatch(valid)
+    log.info(`[admin] 批量导入完成: ${valid.length} 条`)
+    const r = applyReload(req.app)
+    res.json({
+      ok: true,
+      imported: valid.length,
+      reloaded: r.ok,
+      upstreamCount: r.count,
+      ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
+    })
+  } catch (e) {
+    log.error('[admin] 批量导入失败:', e.message)
     res.status(500).json({ error: { message: e.message } })
   }
 })
