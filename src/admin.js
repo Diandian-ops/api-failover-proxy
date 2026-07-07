@@ -1,0 +1,134 @@
+// 管理路由：热加载号池、增删改查上游
+// 所有 /admin/* 路由需要网关鉴权（复用 server.js 的 gatewayKey 中间件）
+import { Router } from 'express'
+import { log } from './logger.js'
+import {
+  loadUpstreams,
+  loadAllUpstreams,
+  upsertUpstream,
+  deleteUpstream,
+  toggleUpstream,
+  getDbPath
+} from './upstream-pool.js'
+
+const router = Router()
+
+// 热加载核心：重新从 DB 读取 enabled 上游，原地替换运行中的 config.upstreams
+// 返回 { ok, count, skipped }：
+//   ok=true  → 已刷新，count 为新上游数
+//   ok=false → 空池保护触发（skipped=true），内存保留旧列表不变
+// 写路由（增/删/启停）写完 DB 后调用本函数，使 DB 成为唯一数据源、改动立即生效
+function applyReload(app) {
+  const fresh = loadUpstreams()
+  if (fresh.length === 0) {
+    log.warn('[admin] DB 中无 enabled 上游，拒绝热加载（内存保留旧列表）')
+    return { ok: false, count: 0, skipped: true }
+  }
+  app.locals.config.upstreams = fresh
+  log.info(`[admin] 热加载完成，上游数量: ${fresh.length}`)
+  fresh.forEach(u => log.info(`  - ${u.name} (${u.type}) -> ${u.base}`))
+  return { ok: true, count: fresh.length, skipped: false }
+}
+
+// 手动热加载入口
+// 用法：POST /admin/reload  body: { gatewayKey: "xxx" }（或通过 Authorization 头）
+router.post('/reload', (req, res) => {
+  try {
+    const r = applyReload(req.app)
+    if (r.skipped) {
+      return res.status(400).json({ error: { message: 'DB 中无 enabled 上游，拒绝热加载（避免清空）' } })
+    }
+    const fresh = req.app.locals.config.upstreams
+    res.json({ ok: true, count: r.count, upstreams: fresh.map(u => ({ name: u.name, type: u.type, base: u.base })) })
+  } catch (e) {
+    log.error('[admin] 热加载失败:', e.message)
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 列出所有上游（含禁用的）
+router.get('/upstreams', (req, res) => {
+  const all = loadAllUpstreams()
+  res.json({ ok: true, db: getDbPath(), count: all.length, upstreams: all })
+})
+
+// 新增/覆盖上游
+// body: { name, type, base, apiKey, weight?, forceStream?, enabled?, priority?, sameRetries?, sameRetryBackoffMs?, modelMap? }
+router.post('/upstreams', (req, res) => {
+  const b = req.body || {}
+  if (!b.name || !b.type || !b.base || !b.apiKey) {
+    return res.status(400).json({ error: { message: '缺少必填字段: name, type, base, apiKey' } })
+  }
+  if (!['openai', 'anthropic'].includes(b.type)) {
+    return res.status(400).json({ error: { message: 'type 必须是 openai 或 anthropic' } })
+  }
+  try {
+    upsertUpstream({
+      name: b.name,
+      type: b.type,
+      base: b.base,
+      apiKey: b.apiKey,
+      weight: b.weight || 1,
+      forceStream: !!b.forceStream,
+      enabled: b.enabled !== false,
+      priority: b.priority ?? 100,
+      sameRetries: b.sameRetries ?? 2,
+      sameRetryBackoffMs: b.sameRetryBackoffMs ?? 800,
+      modelMap: b.modelMap || {}
+    })
+    log.info(`[admin] 上游已保存: ${b.name} (priority=${b.priority ?? 100}, sameRetries=${b.sameRetries ?? 2})`)
+    const r = applyReload(req.app)
+    res.json({
+      ok: true,
+      name: b.name,
+      reloaded: r.ok,
+      upstreamCount: r.count,
+      ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
+    })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 删除上游
+router.delete('/upstreams/:name', (req, res) => {
+  try {
+    deleteUpstream(req.params.name)
+    log.info(`[admin] 上游已删除: ${req.params.name}`)
+    const r = applyReload(req.app)
+    res.json({
+      ok: true,
+      deleted: req.params.name,
+      reloaded: r.ok,
+      upstreamCount: r.count,
+      ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
+    })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 启用/禁用上游
+router.patch('/upstreams/:name', (req, res) => {
+  const enabled = req.body?.enabled
+  if (enabled === undefined) {
+    return res.status(400).json({ error: { message: 'body 需提供 enabled (true/false)' } })
+  }
+  try {
+    toggleUpstream(req.params.name, !!enabled)
+    log.info(`[admin] 上游 ${req.params.name} ${enabled ? '已启用' : '已禁用'}`)
+    const r = applyReload(req.app)
+    res.json({
+      ok: true,
+      name: req.params.name,
+      enabled: !!enabled,
+      reloaded: r.ok,
+      upstreamCount: r.count,
+      ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
+    })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+export default router

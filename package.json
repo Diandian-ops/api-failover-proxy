@@ -1,0 +1,19 @@
+{
+  "name": "api-failover-proxy",
+  "version": "1.0.0",
+  "description": "模型 API 故障自动切换代理（支持 OpenAI / Anthropic 接口，失败自动重试，SSE 流式重试）",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^4.19.2"
+  }
+}

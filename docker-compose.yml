@@ -1,0 +1,29 @@
+services:
+  api-proxy:
+    build: .
+    image: api-failover-proxy:latest
+    container_name: api-proxy
+    restart: unless-stopped
+    user: "501:20"   # 以本机用户运行，写挂载的 settings.json 属主天然正确
+    ports:
+      - "9090:9090"
+    volumes:
+      # 全局配置（port/timeout/策略等）；upstreams 从 DB 加载，可不留
+      - ./config.local.js:/app/config.local.js:ro
+      # 号池 DB 持久化（含上游密钥，不要提交到镜像）
+      - ./logs:/app/logs
+      # 挂载本机 Claude Code 配置，启动时自动把 base_url 指向本代理
+      # 容器以 UID 501 运行，os.homedir() 返回 /，故挂到 /.claude/
+      - /Users/zhangdiandian/.claude/settings.json:/.claude/settings.json
+    environment:
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=9090
+      - GATEWAY_KEY=sk-1234567890
+      # 本机属主，同步写文件后 chown 回去，避免文件属主变 root
+      - SETTINGS_UID=501
+      - SETTINGS_GID=20
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

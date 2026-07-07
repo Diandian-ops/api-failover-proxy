@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Failover Proxy · 号池管理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+  h1 { font-size: 22px; margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .actions { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: opacity 0.2s; }
+  button:hover { opacity: 0.85; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-success { background: #16a34a; color: #fff; }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-warning { background: #d97706; color: #fff; }
+  .btn-secondary { background: #6b7280; color: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+  th { background: #f9fafb; font-weight: 600; font-size: 12px; color: #6b7280; text-transform: uppercase; }
+  tr:hover { background: #f9fafb; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge-on { background: #d1fae5; color: #065f46; }
+  .badge-off { background: #fee2e2; color: #991b1b; }
+  .badge-type { background: #dbeafe; color: #1e40af; }
+  .badge-flag { background: #fef3c7; color: #92400e; }
+  .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-size: 18px; margin-bottom: 16px; }
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #4b5563; }
+  .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; font-family: inherit; }
+  .form-group textarea { font-family: "SF Mono", monospace; font-size: 12px; min-height: 60px; }
+  .form-group .hint { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .form-row { display: flex; gap: 12px; }
+  .form-row .form-group { flex: 1; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 14px; z-index: 200; opacity: 0; transition: opacity 0.3s; }
+  .toast.show { opacity: 1; }
+  .toast-success { background: #16a34a; }
+  .toast-error { background: #dc2626; }
+  .api-key-cell { font-family: "SF Mono", monospace; font-size: 12px; color: #6b7280; }
+  .model-map-cell { font-family: "SF Mono", monospace; font-size: 11px; color: #6b7280; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { text-align: center; padding: 40px; color: #9ca3af; }
+</style>
+</head>
+<body>
+
+<h1>🔌 API Failover Proxy · 号池管理</h1>
+
+<div class="card">
+  <div class="actions">
+    <button class="btn-primary" onclick="openAddModal()">+ 新增上游</button>
+    <button class="btn-success" onclick="reloadPool()">⟳ 热加载</button>
+    <button class="btn-secondary" onclick="loadUpstreams()">刷新列表</button>
+  </div>
+  <div id="upstream-list">
+    <div class="empty">加载中...</div>
+  </div>
+</div>
+
+<!-- 新增/编辑模态框 -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modal-title">新增上游</h2>
+    <input type="hidden" id="f-original-name">
+    <div class="form-group">
+      <label>名称 *</label>
+      <input type="text" id="f-name" placeholder="如 xunfei-astron">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>协议类型 *</label>
+        <select id="f-type">
+          <option value="anthropic">anthropic</option>
+          <option value="openai">openai</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>优先级</label>
+        <input type="number" id="f-priority" value="100" min="1" class="hint">
+        <div class="hint">数字越小越优先</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Base URL *</label>
+      <input type="text" id="f-base" placeholder="https://xxx.com/v1">
+    </div>
+    <div class="form-group">
+      <label>API Key *</label>
+      <input type="text" id="f-apiKey" placeholder="sk-xxx">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>权重</label>
+        <input type="number" id="f-weight" value="1" min="1">
+        <div class="hint">weighted 策略用</div>
+      </div>
+      <div class="form-group">
+        <label>选项</label>
+        <div style="display:flex;gap:12px;padding-top:6px">
+          <label style="font-weight:normal;font-size:13px"><input type="checkbox" id="f-forceStream"> forceStream</label>
+          <label style="font-weight:normal;font-size:13px"><input type="checkbox" id="f-enabled" checked> 启用</label>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>同上游重试次数</label>
+        <input type="number" id="f-sameRetries" value="2" min="0">
+        <div class="hint">失败后先重试同一上游几次，再切换下一个</div>
+      </div>
+      <div class="form-group">
+        <label>重试退避间隔 (ms)</label>
+        <input type="number" id="f-sameRetryBackoffMs" value="800" min="0">
+        <div class="hint">同上游重试之间的等待毫秒</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>ModelMap</label>
+      <textarea id="f-modelMap" placeholder='{"claude-3-5-sonnet":"glm-5.2","glm-5.2":"astron-code-latest"}' rows="3"></textarea>
+      <div class="hint">JSON 格式：请求模型名 → 上游实际模型名</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn-primary" onclick="saveUpstream()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
+const BASE = '';
+
+function headers() {
+  return { 'Authorization': `Bearer ${GATEWAY_KEY}`, 'Content-Type': 'application/json' };
+}
+
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast toast-${type} show`;
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+async function loadUpstreams() {
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams`, { headers: headers() });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    renderTable(d.upstreams);
+  } catch (e) {
+    document.getElementById('upstream-list').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderTable(upstreams) {
+  if (!upstreams || upstreams.length === 0) {
+    document.getElementById('upstream-list').innerHTML = '<div class="empty">号池为空</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>重试</th><th>状态</th>
+    <th>Base URL</th><th>API Key</th><th>ModelMap</th><th>标记</th><th>操作</th>
+  </tr></thead><tbody>`;
+  upstreams.forEach((u, i) => {
+    const mm = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap) : '';
+    const flags = [];
+    if (u.forceStream) flags.push('<span class="badge badge-flag">forceStream</span>');
+    html += `<tr>
+      <td>${i+1}</td>
+      <td><strong>${esc(u.name)}</strong></td>
+      <td><span class="badge badge-type">${u.type}</span></td>
+      <td>${u.priority ?? 100}</td>
+      <td>${u.weight || 1}</td>
+      <td style="font-size:12px">${u.sameRetries ?? 2}×/${u.sameRetryBackoffMs ?? 800}ms</td>
+      <td><span class="badge ${u.enabled ? 'badge-on' : 'badge-off'}">${u.enabled ? '启用' : '禁用'}</span></td>
+      <td style="font-size:12px">${esc(u.base)}</td>
+      <td class="api-key-cell">${esc(u.apiKey.slice(0,12))}...</td>
+      <td class="model-map-cell" title="${esc(mm)}">${esc(mm)}</td>
+      <td>${flags.join('')}</td>
+      <td>
+        <button class="btn-warning" style="padding:4px 10px;font-size:12px" onclick="editUpstream('${esc(u.name)}')">编辑</button>
+        <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
+        <button class="btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('upstream-list').innerHTML = html;
+}
+
+function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+
+function openAddModal() {
+  document.getElementById('modal-title').textContent = '新增上游';
+  document.getElementById('f-original-name').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-name').disabled = false;
+  document.getElementById('f-type').value = 'anthropic';
+  document.getElementById('f-priority').value = '100';
+  document.getElementById('f-base').value = '';
+  document.getElementById('f-apiKey').value = '';
+  document.getElementById('f-weight').value = '1';
+  document.getElementById('f-forceStream').checked = false;
+  document.getElementById('f-enabled').checked = true;
+  document.getElementById('f-sameRetries').value = '2';
+  document.getElementById('f-sameRetryBackoffMs').value = '800';
+  document.getElementById('f-modelMap').value = '';
+  document.getElementById('modal').classList.add('show');
+}
+
+let _upstreamsCache = [];
+async function editUpstream(name) {
+  if (_upstreamsCache.length === 0) {
+    const r = await fetch(`${BASE}/admin/upstreams`, { headers: headers() });
+    _upstreamsCache = (await r.json()).upstreams;
+  }
+  const u = _upstreamsCache.find(x => x.name === name);
+  if (!u) return;
+  document.getElementById('modal-title').textContent = '编辑上游: ' + name;
+  document.getElementById('f-original-name').value = name;
+  document.getElementById('f-name').value = u.name;
+  document.getElementById('f-name').disabled = true;
+  document.getElementById('f-type').value = u.type;
+  document.getElementById('f-priority').value = u.priority ?? 100;
+  document.getElementById('f-base').value = u.base;
+  document.getElementById('f-apiKey').value = u.apiKey;
+  document.getElementById('f-weight').value = u.weight || 1;
+  document.getElementById('f-forceStream').checked = !!u.forceStream;
+  document.getElementById('f-enabled').checked = u.enabled !== false;
+  document.getElementById('f-sameRetries').value = u.sameRetries ?? 2;
+  document.getElementById('f-sameRetryBackoffMs').value = u.sameRetryBackoffMs ?? 800;
+  document.getElementById('f-modelMap').value = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap, null, 2) : '';
+  document.getElementById('modal').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+
+async function saveUpstream() {
+  const name = document.getElementById('f-name').value.trim();
+  const type = document.getElementById('f-type').value;
+  const base = document.getElementById('f-base').value.trim();
+  const apiKey = document.getElementById('f-apiKey').value.trim();
+  const priority = parseInt(document.getElementById('f-priority').value) || 100;
+  const weight = parseInt(document.getElementById('f-weight').value) || 1;
+  const forceStream = document.getElementById('f-forceStream').checked;
+  const enabled = document.getElementById('f-enabled').checked;
+  const sameRetries = parseInt(document.getElementById('f-sameRetries').value) || 0;
+  const sameRetryBackoffMs = parseInt(document.getElementById('f-sameRetryBackoffMs').value) || 0;
+  let modelMap = {};
+  const mmStr = document.getElementById('f-modelMap').value.trim();
+  if (mmStr) {
+    try { modelMap = JSON.parse(mmStr); }
+    catch { toast('ModelMap JSON 格式错误', 'error'); return; }
+  }
+  if (!name || !type || !base || !apiKey) {
+    toast('必填字段不能为空', 'error');
+    return;
+  }
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ name, type, base, apiKey, priority, weight, forceStream, enabled, sameRetries, sameRetryBackoffMs, modelMap })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('已保存');
+    closeModal();
+    _upstreamsCache = [];
+    loadUpstreams();
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'error');
+  }
+}
+
+async function deleteUpstream(name) {
+  if (!confirm(`确认删除上游 "${name}"？`)) return;
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/${encodeURIComponent(name)}`, {
+      method: 'DELETE', headers: headers()
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('已删除');
+    _upstreamsCache = [];
+    loadUpstreams();
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
+}
+
+async function toggleUpstream(name, enabled) {
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/${encodeURIComponent(name)}`, {
+      method: 'PATCH', headers: headers(),
+      body: JSON.stringify({ enabled })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast(enabled ? '已启用' : '已禁用');
+    _upstreamsCache = [];
+    loadUpstreams();
+  } catch (e) {
+    toast('操作失败: ' + e.message, 'error');
+  }
+}
+
+async function reloadPool() {
+  try {
+    const r = await fetch(`${BASE}/admin/reload`, { method: 'POST', headers: headers() });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    toast(`热加载成功，${d.count} 个上游`);
+  } catch (e) {
+    toast('热加载失败: ' + e.message, 'error');
+  }
+}
+
+loadUpstreams();
+</script>
+</body>
+</html>
