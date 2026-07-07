@@ -36,6 +36,36 @@ router.get('/usage', (req, res) => {
   }
 })
 
+// 今日统计：从所有请求日志聚合（不限制条数，真实总数）
+router.get('/today-stats', (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const files = fs.readdirSync(LOG_DIR)
+      .filter(f => f.startsWith('requests-'))
+      .sort().reverse()
+    let total = 0, ok = 0, fail = 0, totalDur = 0, inTok = 0, outTok = 0
+    for (const f of files) {
+      const lines = fs.readFileSync(path.join(LOG_DIR, f), 'utf8').split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          const e = JSON.parse(line)
+          if (!e.timestamp || !e.timestamp.startsWith(today)) continue
+          total++
+          if (e.success) ok++; else fail++
+          totalDur += e.duration || 0
+          inTok += e.inputTokens || 0
+          outTok += e.outputTokens || 0
+        } catch {}
+      }
+    }
+    const avg = total ? Math.round(totalDur / total) : 0
+    const rate = total ? ((ok / total) * 100).toFixed(1) : '-'
+    res.json({ ok: true, today, total, ok, fail, rate, avgDuration: avg, inputTokens: inTok, outputTokens: outTok })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
 // 最近 N 条请求记录（默认 50）
 router.get('/recent-requests', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 500)

@@ -153,6 +153,13 @@ function fmtDuration(ms) {
   if (ms < 1000) return ms + 'ms';
   return (ms/1000).toFixed(1) + 's';
 }
+function fmtNum(n) {
+  if (n === 0) return '0';
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'k';
+  return n.toString();
+}
 function fmtUptime(s) {
   if (!s) return '-';
   const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
@@ -190,25 +197,17 @@ async function loadTopBar() {
 /* 统计卡片 */
 async function loadStats() {
   try {
-    const r = await fetch('/monitor/recent-requests?limit=200', {headers:headers()});
+    const r = await fetch('/monitor/today-stats', {headers:headers()});
     const d = await r.json();
-    const reqs = d.requests || [];
-    const today = new Date().toISOString().slice(0,10);
-    const t = reqs.filter(x=>(x.timestamp||'').startsWith(today));
-    const ok = t.filter(x=>x.success).length;
-    const fail = t.filter(x=>!x.success).length;
-    const avg = t.length ? Math.round(t.reduce((s,x)=>s+(x.duration||0),0)/t.length) : 0;
-    const inTok = t.reduce((s,x)=>s+(x.inputTokens||0),0);
-    const outTok = t.reduce((s,x)=>s+(x.outputTokens||0),0);
-    const rate = t.length ? ((ok/t.length)*100).toFixed(1) : '-';
+    if (!d.ok) throw new Error('fetch failed');
     document.getElementById('stats').innerHTML = `
-      <div class="stat-card"><div class="num c-white">${t.length}</div><div class="label">今日请求</div></div>
-      <div class="stat-card"><div class="num c-green">${ok}</div><div class="label">成功</div></div>
-      <div class="stat-card"><div class="num c-red">${fail}</div><div class="label">失败</div></div>
-      <div class="stat-card"><div class="num c-blue">${rate}%</div><div class="label">成功率</div></div>
-      <div class="stat-card"><div class="num c-white">${fmtDuration(avg)}</div><div class="label">平均耗时</div></div>
-      <div class="stat-card"><div class="num c-yellow">${inTok.toLocaleString()}</div><div class="label">输入 tokens</div></div>
-      <div class="stat-card"><div class="num c-blue">${outTok.toLocaleString()}</div><div class="label">输出 tokens</div></div>
+      <div class="stat-card"><div class="num c-white">${d.total}</div><div class="label">今日请求</div></div>
+      <div class="stat-card"><div class="num c-green">${d.ok}</div><div class="label">成功</div></div>
+      <div class="stat-card"><div class="num c-red">${d.fail}</div><div class="label">失败</div></div>
+      <div class="stat-card"><div class="num c-blue">${d.rate}%</div><div class="label">成功率</div></div>
+      <div class="stat-card"><div class="num c-white">${fmtDuration(d.avgDuration)}</div><div class="label">平均耗时</div></div>
+      <div class="stat-card"><div class="num c-yellow">${fmtNum(d.inputTokens)}</div><div class="label">输入 tokens</div></div>
+      <div class="stat-card"><div class="num c-blue">${fmtNum(d.outputTokens)}</div><div class="label">输出 tokens</div></div>
     `;
   } catch(e) { document.getElementById('stats').innerHTML = '<div class="empty">加载失败</div>'; }
 }
@@ -285,7 +284,7 @@ async function loadUsage() {
     if (!rows.length) { document.getElementById('usage').innerHTML = '<div class="empty">无用量数据</div>'; return; }
     let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求</th><th>失败</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
     rows.forEach(r => {
-      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${(r.inputTokens||0).toLocaleString()}</td><td class="num">${(r.outputTokens||0).toLocaleString()}</td></tr>`;
+      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${fmtNum(r.inputTokens||0)}</td><td class="num">${fmtNum(r.outputTokens||0)}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('usage').innerHTML = html;
