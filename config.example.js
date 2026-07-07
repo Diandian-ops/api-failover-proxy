@@ -49,6 +49,14 @@ export default {
     timeoutMs: 5000      // 单次探测超时（毫秒，默认 5s）
   },
 
+  // 限流/并发控制：保护上游不被突发流量打爆
+  rateLimit: {
+    enabled: true,          // 是否启用
+    strategy: 'reject',    // 'reject' = 超并发立即返回 429；'queue' = 排队等待
+    maxConcurrent: 5,     // 每上游最大并发请求数
+    maxQueue: 100          // queue 策略下最大排队数（reject 策略忽略）
+  },
+
   // 上游 API 列表 —— 按顺序尝试，前面的失败后自动切到后面的
   // type: 'openai'    -> 转发到 {base}/chat/completions
   // type: 'anthropic' -> 转发到 {base}/messages

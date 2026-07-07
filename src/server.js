@@ -12,6 +12,7 @@ import adminRouter from './admin.js'
 import monitorRouter from './monitor.js'
 
 import { HealthProbe } from './health-probe.js'
+import { RateLimiter } from './rate-limiter.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
@@ -135,9 +136,13 @@ app.locals.breaker = breaker
 const healthProbe = new HealthProbe(config, breaker)
 app.locals.healthProbe = healthProbe
 
+// 限流/并发控制
+const rateLimiter = new RateLimiter(config)
+app.locals.rateLimiter = rateLimiter
+
 async function breakerWrap(req, res, path) {
   try {
-    await dispatch(path, req, res, config, breaker)
+    await dispatch(path, req, res, config, breaker, rateLimiter)
   } catch (e) {
     log.error('[server] dispatch 异常:', e.message)
     if (!res.headersSent) {

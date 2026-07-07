@@ -73,7 +73,7 @@ function applyModelMap(body, upstream) {
 /**
  * 核心调度
  */
-export async function dispatch(reqPath, req, res, config, breaker) {
+export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) {
   const apiType = detectApiType(reqPath)
   if (!apiType) {
     res.status(404).json({ error: { message: `未知路径: ${reqPath}`, type: 'proxy_error', request_id: req.requestId || null } })
@@ -154,6 +154,16 @@ export async function dispatch(reqPath, req, res, config, breaker) {
     for (let sr = 0; sr <= sameRetries; sr++) {
       log.info(`[dispatch] 第 ${attempt + 1}/${maxRetries + 1} 次 -> ${upstream.name}${sr > 0 ? ` 同上游重试 ${sr}/${sameRetries}` : ''} (${upstream.type})${convert ? ` [协议转换 ${apiType}→${upstream.type}]` : ''}${forceStream ? ' [forceStream]' : ''} stream=${upstreamStream}`)
 
+      // ── 限流 acquire ──
+      const acquired = await rateLimiter.acquire(upstream.name)
+      if (!acquired) {
+        log.warn(`[dispatch] ${upstream.name} 并发超限，限流跳过`)
+        lastStatus = 429
+        lastErr = new Error(`upstream ${upstream.name} rate limited`)
+        attempted.push({ upstream: upstream.name, status: 429, error: 'rate limited' })
+        break
+      }
+
       // ── 发送请求 ──
       let response, controller
       try {
@@ -165,10 +175,15 @@ export async function dispatch(reqPath, req, res, config, breaker) {
         lastStatus = 0
         log.warn(`[dispatch] ${upstream.name} 连接失败: ${e.message}`)
         logUsage2(upstream, originalModel, false, 0, 0, startTime)
-        if (sr < sameRetries) { await sleep(sameBackoff); continue }
+        if (sr < sameRetries) {
+          rateLimiter.release(upstream.name)
+          await sleep(sameBackoff)
+          continue
+        }
         // 同上游重试耗尽，整组只记一次熔断
         attempted.push({ upstream: upstream.name, status: 0, error: e.message })
         breaker.recordFail(upstream.name)
+        rateLimiter.release(upstream.name)
         break  // 跳出同上游重试，切到下一个上游
       }
 
@@ -191,6 +206,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
             forwarder.inputTokens,
             forwarder.outputTokens || forwarder.bytesSent,
             startTime)
+          rateLimiter.release(upstream.name)
           return
         }
 
@@ -205,6 +221,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
             aggregated.usage?.input_tokens || aggregated.usage?.prompt_tokens || 0,
             aggregated.usage?.output_tokens || aggregated.usage?.completion_tokens || 0,
             startTime)
+          rateLimiter.release(upstream.name)
           return
         }
 
@@ -230,10 +247,12 @@ export async function dispatch(reqPath, req, res, config, breaker) {
           outJson.usage?.input_tokens || outJson.usage?.prompt_tokens || 0,
           outJson.usage?.output_tokens || outJson.usage?.completion_tokens || 0,
           startTime)
+        rateLimiter.release(upstream.name)
         return
       }
 
-      // 需要重试
+      // 需要重试：先释放信号量
+      rateLimiter.release(upstream.name)
       let errText = ''
       try { errText = await response.text() } catch {}
       log.warn(`[dispatch] ${upstream.name} 返回 ${status}${sr < sameRetries ? `，同上游重试` : `，切换下一个上游`}。错误: ${errText.slice(0, 200)}`)
