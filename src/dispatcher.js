@@ -82,9 +82,12 @@ export async function dispatch(reqPath, req, res, config, breaker) {
 
   const upstreams = pickUpstreams(apiType, config, breaker)
   if (upstreams.length === 0) {
-    res.status(503).json({ error: { message: `没有可用的上游（可能都被熔断）`, type: 'proxy_error' } })
+    res.status(503).json({ error: { message: `没有可用的上游（可能都被熔断）`, type: 'all_upstreams_failed' } })
     return
   }
+
+  // 记录本次请求尝试过的上游（用于错误响应里透传给客户端）
+  const attempted = []
 
   const body = req.body
   if (!body) {
@@ -159,6 +162,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
         _logUsage(config, upstream, originalModel, false, 0, 0, startTime)
         if (sr < sameRetries) { await sleep(sameBackoff); continue }
         // 同上游重试耗尽，整组只记一次熔断
+        attempted.push({ upstream: upstream.name, status: 0, error: e.message })
         breaker.recordFail(upstream.name)
         break  // 跳出同上游重试，切到下一个上游
       }
@@ -233,6 +237,11 @@ export async function dispatch(reqPath, req, res, config, breaker) {
       lastStatus = status
       lastErr = new Error(`upstream ${upstream.name} returned ${status}`)
 
+      // 整组重试耗尽时再 push，避免同组重复
+      if (sr >= sameRetries) {
+        attempted.push({ upstream: upstream.name, status, error: errText.slice(0, 200) })
+      }
+
       if (sr < sameRetries) {
         await sleep(sameBackoff)
         continue
@@ -248,12 +257,17 @@ export async function dispatch(reqPath, req, res, config, breaker) {
     }
   }
 
-  // 全部失败
+  // 全部失败：返回结构化代理错误，便于客户端/监控排查
   const msg = lastErr ? lastErr.message : 'all upstreams failed'
   log.error(`[dispatch] 所有上游均失败: ${msg}`)
   if (!res.headersSent) {
     res.status(lastStatus || 502).json({
-      error: { message: `所有上游 API 均不可用: ${msg}`, type: 'proxy_error', last_status: lastStatus }
+      error: {
+        message: `所有上游 API 均不可用: ${msg}`,
+        type: 'all_upstreams_failed',
+        last_status: lastStatus,
+        upstreams_tried: attempted
+      }
     })
   }
 }
