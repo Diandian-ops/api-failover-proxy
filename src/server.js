@@ -50,6 +50,16 @@ app.get('/ready', (req, res) => {
   res.json({ ready: true, version, upstreams: config.upstreams.length })
 })
 
+// 请求追踪 ID 中间件：每个请求分配短 ID，写响应头 + 挂到 req，便于排查链路
+import crypto from 'node:crypto'
+app.use((req, res, next) => {
+  // 优先沿用客户端传入的 X-Request-Id（便于客户端串联自己的日志）
+  const id = (req.headers['x-request-id'] || `r-${crypto.randomBytes(3).toString('hex')}`).slice(0, 64)
+  req.requestId = id
+  res.setHeader('X-Request-Id', id)
+  next()
+})
+
 // 网关鉴权中间件
 app.use((req, res, next) => {
   if (config.gatewayKey) {

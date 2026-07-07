@@ -76,22 +76,27 @@ function applyModelMap(body, upstream) {
 export async function dispatch(reqPath, req, res, config, breaker) {
   const apiType = detectApiType(reqPath)
   if (!apiType) {
-    res.status(404).json({ error: { message: `未知路径: ${reqPath}`, type: 'proxy_error' } })
+    res.status(404).json({ error: { message: `未知路径: ${reqPath}`, type: 'proxy_error', request_id: req.requestId || null } })
     return
   }
 
   const upstreams = pickUpstreams(apiType, config, breaker)
   if (upstreams.length === 0) {
-    res.status(503).json({ error: { message: `没有可用的上游（可能都被熔断）`, type: 'all_upstreams_failed' } })
+    res.status(503).json({ error: { message: `没有可用的上游（可能都被熔断）`, type: 'all_upstreams_failed', request_id: req.requestId || null } })
     return
   }
 
   // 记录本次请求尝试过的上游（用于错误响应里透传给客户端）
   const attempted = []
 
+  // 绑定 requestId 的用量日志闭包（避免每个调用点都传 requestId）
+  const requestId = req.requestId || null
+  const logUsage2 = (upstream, model, success, inputTokens, outputTokens, startTime) =>
+    _logUsage(config, upstream, model, success, inputTokens, outputTokens, startTime, requestId)
+
   const body = req.body
   if (!body) {
-    res.status(400).json({ error: { message: '请求体为空', type: 'proxy_error' } })
+    res.status(400).json({ error: { message: '请求体为空', type: 'proxy_error', request_id: req.requestId || null } })
     return
   }
 
@@ -159,7 +164,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
         lastErr = e
         lastStatus = 0
         log.warn(`[dispatch] ${upstream.name} 连接失败: ${e.message}`)
-        _logUsage(config, upstream, originalModel, false, 0, 0, startTime)
+        logUsage2(upstream, originalModel, false, 0, 0, startTime)
         if (sr < sameRetries) { await sleep(sameBackoff); continue }
         // 同上游重试耗尽，整组只记一次熔断
         attempted.push({ upstream: upstream.name, status: 0, error: e.message })
@@ -182,7 +187,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
           }
           const dur = Date.now() - startTime
           log.info(`[dispatch] ${upstream.name} 流式完成 ${forwarder.bytesSent}B ${dur}ms`)
-          _logUsage(config, upstream, originalModel, true,
+          logUsage2(upstream, originalModel, true,
             forwarder.inputTokens,
             forwarder.outputTokens || forwarder.bytesSent,
             startTime)
@@ -196,7 +201,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
           const dur = Date.now() - startTime
           res.status(status).json(aggregated)
           log.info(`[dispatch] ${upstream.name} forceStream 聚合完成 ${dur}ms`)
-          _logUsage(config, upstream, originalModel, true,
+          logUsage2(upstream, originalModel, true,
             aggregated.usage?.input_tokens || aggregated.usage?.prompt_tokens || 0,
             aggregated.usage?.output_tokens || aggregated.usage?.completion_tokens || 0,
             startTime)
@@ -221,7 +226,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
         res.status(status).json(outJson)
         const dur = Date.now() - startTime
         log.info(`[dispatch] ${upstream.name} 非流式完成 status=${status} ${dur}ms`)
-        _logUsage(config, upstream, originalModel, true,
+        logUsage2(upstream, originalModel, true,
           outJson.usage?.input_tokens || outJson.usage?.prompt_tokens || 0,
           outJson.usage?.output_tokens || outJson.usage?.completion_tokens || 0,
           startTime)
@@ -232,7 +237,7 @@ export async function dispatch(reqPath, req, res, config, breaker) {
       let errText = ''
       try { errText = await response.text() } catch {}
       log.warn(`[dispatch] ${upstream.name} 返回 ${status}${sr < sameRetries ? `，同上游重试` : `，切换下一个上游`}。错误: ${errText.slice(0, 200)}`)
-      _logUsage(config, upstream, originalModel, false, 0, 0, startTime)
+      logUsage2(upstream, originalModel, false, 0, 0, startTime)
 
       lastStatus = status
       lastErr = new Error(`upstream ${upstream.name} returned ${status}`)
@@ -266,16 +271,18 @@ export async function dispatch(reqPath, req, res, config, breaker) {
         message: `所有上游 API 均不可用: ${msg}`,
         type: 'all_upstreams_failed',
         last_status: lastStatus,
+        request_id: req.requestId || null,
         upstreams_tried: attempted
       }
     })
   }
 }
 
-function _logUsage(config, upstream, model, success, inputTokens, outputTokens, startTime) {
+function _logUsage(config, upstream, model, success, inputTokens, outputTokens, startTime, requestId = null) {
   if (!config.usageLog?.enabled) return
   const duration = Date.now() - startTime
   logRequest({
+    requestId,
     upstream: upstream.name,
     upstreamType: upstream.type,
     model, success, inputTokens, outputTokens, duration
