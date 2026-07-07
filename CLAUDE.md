@@ -74,3 +74,14 @@ PROXY_URL=http://127.0.0.1:8787 npm test
 - `config.local.js` 是本地实际配置，已被 `.gitignore` 忽略；密钥应通过 `process.env.XXX` 读取，避免泄露到提交文件或日志。
 - 上游按 `config.upstreams` 顺序尝试（failover 模式），前面失败自动切后面。
 - 同类型上游才会互相备份，除非开启 `enableConversion` 做跨协议转换。
+
+## 开发规范
+
+- **密钥**：一律通过 `process.env.XXX` 读取，禁止硬编码到任何已提交文件（源码、配置模板、文档、日志）。
+- **不提交的文件**：`config.local.js`、`logs/`（含 `upstreams.db*`、`*.jsonl`）、`node_modules/`、`.aionrs/` 已在 `.gitignore`；新增运行时产物若含敏感信息，记得补进 `.gitignore`。
+- **提交前自检**：`git show --stat HEAD --name-only | grep -iE "config.local|upstreams.db|logs/|sk-[a-z0-9]{20}"`，无输出才算干净。
+- **提交信息**：用 Conventional Commits（`feat` / `fix` / `docs` / `refactor` / `chore` 等），中英文均可。
+- **测试**：改动后运行 `npm test`（需先启动代理）确认冒烟测试通过；测试未过不要标记完成。
+- **代码风格**：ESM、Node ≥18、保持现有依赖（`express` + `better-sqlite3`），新增依赖前说明理由。
+- **号池改动**：走 admin API / 网页端（写完 DB 自动热加载），不要直接改 SQLite 文件后忘 reload。
+
