@@ -69,3 +69,46 @@ export function getUsageSummary() {
   }
   return summary
 }
+
+/**
+ * 清理过期日志文件（启动时调用）
+ * - requests-YYYY-MM-DD.jsonl：保留 logRetentionDays 天
+ * - usage-YYYY-MM.jsonl：保留 logRetentionMonths 个月
+ * 不会删除 upstreams.db* / last-upstream.json 等非日志文件
+ * 返回删除的文件数
+ */
+export function cleanupOldLogs(cfg = {}) {
+  // 默认保留 30 天 / 6 个月；配置里显式给 0 才关闭清理
+  const keepDays = cfg.logRetentionDays === undefined ? 30 : Number(cfg.logRetentionDays)
+  const keepMonths = cfg.logRetentionMonths === undefined ? 6 : Number(cfg.logRetentionMonths)
+  if ((keepDays <= 0 || isNaN(keepDays)) && (keepMonths <= 0 || isNaN(keepMonths))) return 0
+
+  let removed = 0
+  const now = Date.now()
+  let files
+  try { files = fs.readdirSync(LOG_DIR) } catch { return 0 }
+
+  for (const f of files) {
+    let cutoff = 0
+    let match = f.match(/^requests-(\d{4})-(\d{2})-(\d{2})\.jsonl$/)
+    if (match && keepDays > 0) {
+      const d = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`)
+      cutoff = now - keepDays * 86400000
+      if (d.getTime() < cutoff) {
+        try { fs.unlinkSync(path.join(LOG_DIR, f)); removed++ } catch {}
+      }
+      continue
+    }
+    match = f.match(/^usage-(\d{4})-(\d{2})\.jsonl$/)
+    if (match && keepMonths > 0) {
+      // 按月首日计算
+      const d = new Date(`${match[1]}-${match[2]}-01T00:00:00Z`)
+      cutoff = now - keepMonths * 30 * 86400000
+      if (d.getTime() < cutoff) {
+        try { fs.unlinkSync(path.join(LOG_DIR, f)); removed++ } catch {}
+      }
+      continue
+    }
+  }
+  return removed
+}

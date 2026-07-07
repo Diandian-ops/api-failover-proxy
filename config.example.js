@@ -38,6 +38,10 @@ export default {
     cooldownSec: 60
   },
 
+  // 日志保留：启动时清理超期日志文件（0 表示永不清理）
+  logRetentionDays: 30,     // requests-*.jsonl 保留天数
+  logRetentionMonths: 6,    // usage-*.jsonl 保留月数
+
   // 上游 API 列表 —— 按顺序尝试，前面的失败后自动切到后面的
   // type: 'openai'    -> 转发到 {base}/chat/completions
   // type: 'anthropic' -> 转发到 {base}/messages
