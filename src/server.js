@@ -11,6 +11,8 @@ import { getUsageSummary, cleanupOldLogs } from './usage-log.js'
 import adminRouter from './admin.js'
 import monitorRouter from './monitor.js'
 
+import { HealthProbe } from './health-probe.js'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
 const version = pkg.version
@@ -129,6 +131,10 @@ app.use((err, req, res, next) => {
 const breaker = new CircuitBreaker(config.circuitBreaker)
 app.locals.breaker = breaker
 
+// 上游健康探测
+const healthProbe = new HealthProbe(config, breaker)
+app.locals.healthProbe = healthProbe
+
 async function breakerWrap(req, res, path) {
   try {
     await dispatch(path, req, res, config, breaker)
@@ -154,8 +160,10 @@ const server = app.listen(config.port, config.host, () => {
   } catch (e) {
     log.warn(`日志清理失败（不影响启动）: ${e.message}`)
   }
-  // Claude Code settings.json 同步默认不自动执行，由管理界面手动控制
-  log.info(`Claude Code 同步: 手动模式（/admin 页面控制）`)
+  // 启动健康探测
+  healthProbe.start()
+  // 客户端配置同步默认不自动执行，由管理界面手动控制
+  log.info(`客户端配置同步: 手动模式（/admin 页面控制）`)
 })
 
 // 端口冲突等启动错误友好提示
@@ -174,6 +182,8 @@ function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
   log.info(`收到 ${signal}，停止接收新请求，等待在途请求完成...`)
+  // 停止健康探测
+  healthProbe.stop()
   // 10s 超时强制退出兜底
   const forceTimer = setTimeout(() => {
     log.warn('优雅关闭超时，强制退出')

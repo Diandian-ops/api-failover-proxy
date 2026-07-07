@@ -42,6 +42,13 @@ export default {
   logRetentionDays: 30,     // requests-*.jsonl 保留天数
   logRetentionMonths: 6,    // usage-*.jsonl 保留月数
 
+  // 上游健康探测：后台定时检测上游是否存活，提前发现故障
+  healthProbe: {
+    enabled: true,        // 是否启用
+    intervalMs: 30000,   // 探测间隔（毫秒，默认 30s）
+    timeoutMs: 5000      // 单次探测超时（毫秒，默认 5s）
+  },
+
   // 上游 API 列表 —— 按顺序尝试，前面的失败后自动切到后面的
   // type: 'openai'    -> 转发到 {base}/chat/completions
   // type: 'anthropic' -> 转发到 {base}/messages
