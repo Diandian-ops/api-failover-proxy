@@ -1,6 +1,6 @@
-// 启动时自动同步 ~/.claude/settings.json 的 env 字段，确保 Claude Code 走本代理
-// 只改 env 里的 5 个字段，其他字段（permissions/hooks/effortLevel 等）保留不动
-// 容器环境（无 ~/.claude 或只读）下自动跳过
+// Claude Code settings.json 同步模块
+// 提供手动开关：启用=把 Claude Code 指向本代理；禁用=从 .bak 恢复原始配置
+// 默认不在启动时自动执行，由管理界面 / admin API 手动触发
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -8,42 +8,77 @@ import { log } from './logger.js'
 
 const SETTINGS_PATH = process.env.CLAUDE_SETTINGS_PATH ||
   path.join(os.homedir(), '.claude', 'settings.json')
+const BACKUP_PATH = SETTINGS_PATH + '.bak'
 
 // 期望 Claude Code 使用的模型名
-// 用 glm-5.2（how88 原生模型名）—— Claude Code 对未知模型放行 auto 模式，
-// 而对 claude-opus-4-20250514 等官方名反而可能限制 auto
 const EXPECTED_MODELS = {
   ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.2',
   ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.2',
   ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.2'
 }
 
+function getExpectedEnv(config) {
+  return {
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${config.port}`,
+    ANTHROPIC_AUTH_TOKEN: config.gatewayKey,
+    ...EXPECTED_MODELS
+  }
+}
+
+// 修复文件属主（容器内 root 写文件后把属主改回本机用户）
+function fixOwnership(filePath) {
+  const uid = process.env.SETTINGS_UID ? Number(process.env.SETTINGS_UID) : -1
+  const gid = process.env.SETTINGS_GID ? Number(process.env.SETTINGS_GID) : -1
+  if (uid >= 0 && gid >= 0) {
+    try { fs.chownSync(filePath, uid, gid) } catch {}
+  }
+}
+
+/**
+ * 查询当前同步状态：settings.json 是否指向本代理
+ */
+export function getSyncStatus(config) {
+  try {
+    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'))
+    const env = settings.env || {}
+    const expected = getExpectedEnv(config)
+    const synced = Object.entries(expected).every(([k, v]) => env[k] === v)
+    const hasBackup = fs.existsSync(BACKUP_PATH)
+    return {
+      available: true,
+      synced,
+      hasBackup,
+      path: SETTINGS_PATH,
+      current: {
+        ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL || null,
+        ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN ? '***' : null,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: env.ANTHROPIC_DEFAULT_OPUS_MODEL || null,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: env.ANTHROPIC_DEFAULT_SONNET_MODEL || null,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: env.ANTHROPIC_DEFAULT_HAIKU_MODEL || null
+      }
+    }
+  } catch {
+    return { available: false, synced: false, hasBackup: false, path: SETTINGS_PATH }
+  }
+}
+
+/**
+ * 启用同步：把 Claude Code 的 settings.json 指向本代理
+ * 会先备份原文件到 .bak
+ */
 export function syncClaudeSettings(config) {
   if (!config.gatewayKey) {
-    log.info('[sync] 未配置 gatewayKey，跳过 settings.json 同步')
-    return
-  }
-
-  // 容器/服务器环境禁用：通过 DISABLE_CLAUDE_SYNC=1 或 config.disableClaudeSync 开关
-  if (process.env.DISABLE_CLAUDE_SYNC === '1' || config.disableClaudeSync) {
-    log.info('[sync] 已禁用 settings.json 同步（容器/服务器模式）')
-    return
+    return { ok: false, error: '未配置 gatewayKey，无法同步' }
   }
 
   let settings = {}
   try {
     settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'))
   } catch {
-    log.warn(`[sync] 读不到 ${SETTINGS_PATH}，跳过同步`)
-    return
+    return { ok: false, error: `读不到 ${SETTINGS_PATH}` }
   }
 
-  const expectedEnv = {
-    ANTHROPIC_BASE_URL: `http://127.0.0.1:${config.port}`,
-    ANTHROPIC_AUTH_TOKEN: config.gatewayKey,
-    ...EXPECTED_MODELS
-  }
-
+  const expectedEnv = getExpectedEnv(config)
   const env = settings.env || (settings.env = {})
   let changed = false
   const changes = []
@@ -57,30 +92,50 @@ export function syncClaudeSettings(config) {
   }
 
   if (!changed) {
-    log.info('[sync] settings.json env 已是预期值，无需同步')
-    return
+    return { ok: true, alreadySynced: true, message: 'settings.json 已指向本代理，无需修改' }
   }
 
-  // 备份原文件
-  const backupPath = SETTINGS_PATH + '.bak'
-  try {
-    fs.copyFileSync(SETTINGS_PATH, backupPath)
-  } catch {}
+  // 备份原文件（如果还没有备份的话，避免覆盖最早的原始备份）
+  let backupCreated = false
+  if (!fs.existsSync(BACKUP_PATH)) {
+    try {
+      fs.copyFileSync(SETTINGS_PATH, BACKUP_PATH)
+      fixOwnership(BACKUP_PATH)
+      backupCreated = true
+    } catch (e) {
+      log.warn(`[sync] 备份写入失败: ${e.message}（恢复功能将不可用）`)
+      return { ok: false, error: `备份写入失败（${e.message}），已中止同步。请检查挂载目录是否可写。` }
+    }
+  } else {
+    backupCreated = true
+  }
 
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2))
-    // 挂载进容器时，容器内 root 写文件会把属主改成 root，本机用户改不动
-    // 通过 SETTINGS_UID/SETTINGS_GID 传入本机属主，写完修回去
-    const uid = process.env.SETTINGS_UID ? Number(process.env.SETTINGS_UID) : -1
-    const gid = process.env.SETTINGS_GID ? Number(process.env.SETTINGS_GID) : -1
-    if (uid >= 0 && gid >= 0) {
-      try { fs.chownSync(SETTINGS_PATH, uid, gid) } catch {}
-      try { fs.chownSync(backupPath, uid, gid) } catch {}
-    }
-    log.info(`[sync] 已同步 settings.json（备份: ${backupPath}）`)
+    fixOwnership(SETTINGS_PATH)
+    log.info(`[sync] 已同步 settings.json（备份: ${BACKUP_PATH}）`)
     changes.forEach(c => log.info(`  - ${c}`))
     log.warn('[sync] 改动需重启 Claude Code 才生效')
+    return { ok: true, changes }
   } catch (e) {
-    log.error(`[sync] 写入 settings.json 失败: ${e.message}`)
+    return { ok: false, error: `写入失败: ${e.message}` }
+  }
+}
+
+/**
+ * 禁用同步：从 .bak 恢复原始 settings.json
+ */
+export function restoreClaudeSettings() {
+  if (!fs.existsSync(BACKUP_PATH)) {
+    return { ok: false, error: `无备份文件 ${BACKUP_PATH}，无法恢复` }
+  }
+  try {
+    fs.copyFileSync(BACKUP_PATH, SETTINGS_PATH)
+    fixOwnership(SETTINGS_PATH)
+    log.info(`[sync] 已从备份恢复 settings.json`)
+    log.warn('[sync] 改动需重启 Claude Code 才生效')
+    return { ok: true, restored: true }
+  } catch (e) {
+    return { ok: false, error: `恢复失败: ${e.message}` }
   }
 }

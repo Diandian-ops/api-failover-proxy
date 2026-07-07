@@ -10,6 +10,7 @@ import {
   toggleUpstream,
   getDbPath
 } from './upstream-pool.js'
+import { getSyncStatus, syncClaudeSettings, restoreClaudeSettings } from './sync-claude-settings.js'
 
 const router = Router()
 
@@ -126,6 +127,38 @@ router.patch('/upstreams/:name', (req, res) => {
       upstreamCount: r.count,
       ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
     })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// Claude Code settings.json 同步控制
+// 查询状态：GET /admin/claude-sync
+// 启用同步：POST /admin/claude-sync { action: 'sync' }
+// 禁用同步（恢复备份）：POST /admin/claude-sync { action: 'restore' }
+router.get('/claude-sync', (req, res) => {
+  try {
+    const status = getSyncStatus(req.app.locals.config)
+    res.json({ ok: true, ...status })
+  } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+router.post('/claude-sync', (req, res) => {
+  const action = req.body?.action
+  if (!['sync', 'restore'].includes(action)) {
+    return res.status(400).json({ error: { message: "action 必须是 'sync' 或 'restore'" } })
+  }
+  try {
+    const result = action === 'sync'
+      ? syncClaudeSettings(req.app.locals.config)
+      : restoreClaudeSettings()
+    if (!result.ok) {
+      return res.status(400).json({ error: { message: result.error } })
+    }
+    log.info(`[admin] Claude Code 同步 ${action} 完成`)
+    res.json({ ok: true, action, ...result })
   } catch (e) {
     res.status(500).json({ error: { message: e.message } })
   }

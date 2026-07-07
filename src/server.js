@@ -8,7 +8,6 @@ import { log } from './logger.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { dispatch } from './dispatcher.js'
 import { getUsageSummary, cleanupOldLogs } from './usage-log.js'
-import { syncClaudeSettings } from './sync-claude-settings.js'
 import adminRouter from './admin.js'
 import monitorRouter from './monitor.js'
 
@@ -155,8 +154,8 @@ const server = app.listen(config.port, config.host, () => {
   } catch (e) {
     log.warn(`日志清理失败（不影响启动）: ${e.message}`)
   }
-  // 启动时自动同步 ~/.claude/settings.json，确保 Claude Code 走本代理
-  syncClaudeSettings(config)
+  // Claude Code settings.json 同步默认不自动执行，由管理界面手动控制
+  log.info(`Claude Code 同步: 手动模式（/admin 页面控制）`)
 })
 
 // 端口冲突等启动错误友好提示

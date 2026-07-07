@@ -62,6 +62,17 @@
   </div>
 </div>
 
+<!-- Claude Code 同步控制 -->
+<div class="card">
+  <h2 style="font-size:16px;margin-bottom:12px">🖥️ Claude Code 同步</h2>
+  <div id="claude-sync-status"><div class="empty">加载中...</div></div>
+  <div class="actions" style="margin-top:12px">
+    <button class="btn-primary" onclick="claudeSync('sync')">启用同步（指向本代理）</button>
+    <button class="btn-warning" onclick="claudeSync('restore')">禁用同步（恢复原配置）</button>
+    <button class="btn-secondary" onclick="loadClaudeSyncStatus()">刷新状态</button>
+  </div>
+</div>
+
 <!-- 新增/编辑模态框 -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
@@ -322,6 +333,59 @@ async function reloadPool() {
 }
 
 loadUpstreams();
+loadClaudeSyncStatus();
+
+// Claude Code 同步状态
+async function loadClaudeSyncStatus() {
+  try {
+    const r = await fetch(`${BASE}/admin/claude-sync`, { headers: headers() });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    const el = document.getElementById('claude-sync-status');
+    if (!d.available) {
+      el.innerHTML = '<div class="empty">读不到 settings.json（容器/服务器环境正常现象）</div>';
+      return;
+    }
+    const badge = d.synced
+      ? '<span class="badge badge-on">已同步</span>'
+      : '<span class="badge badge-off">未同步</span>';
+    const backup = d.hasBackup
+      ? '<span class="badge badge-flag">有备份</span>'
+      : '<span style="font-size:12px;color:#9ca3af">无备份</span>';
+    const c = d.current || {};
+    el.innerHTML = `
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">
+        ${badge} ${backup}
+        <span style="font-size:12px;color:#9ca3af">${esc(d.path)}</span>
+      </div>
+      <table style="font-size:12px">
+        <tr><td style="color:#6b7280;width:200px">ANTHROPIC_BASE_URL</td><td style="font-family:SF Mono,monospace">${esc(c.ANTHROPIC_BASE_URL || '-')}</td></tr>
+        <tr><td style="color:#6b7280">ANTHROPIC_AUTH_TOKEN</td><td>${c.ANTHROPIC_AUTH_TOKEN ? '***' : '-'}</td></tr>
+        <tr><td style="color:#6b7280">OPUS_MODEL</td><td>${esc(c.ANTHROPIC_DEFAULT_OPUS_MODEL || '-')}</td></tr>
+        <tr><td style="color:#6b7280">SONNET_MODEL</td><td>${esc(c.ANTHROPIC_DEFAULT_SONNET_MODEL || '-')}</td></tr>
+        <tr><td style="color:#6b7280">HAIKU_MODEL</td><td>${esc(c.ANTHROPIC_DEFAULT_HAIKU_MODEL || '-')}</td></tr>
+      </table>`;
+  } catch (e) {
+    document.getElementById('claude-sync-status').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function claudeSync(action) {
+  const label = action === 'sync' ? '启用同步' : '禁用同步（恢复）';
+  if (action === 'restore' && !confirm('确认从备份恢复 settings.json？当前指向代理的配置将被覆盖。')) return;
+  try {
+    const r = await fetch(`${BASE}/admin/claude-sync`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ action })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || '操作失败');
+    toast(`${label}成功，需重启 Claude Code 生效`);
+    loadClaudeSyncStatus();
+  } catch (e) {
+    toast(`${label}失败: ` + e.message, 'error');
+  }
+}
 </script>
 </body>
 </html>
