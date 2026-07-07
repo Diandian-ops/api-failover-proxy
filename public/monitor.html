@@ -5,99 +5,145 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>API Failover Proxy · 运行监控</title>
 <style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #273549;
+    --border: #334155; --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
+    --primary: #60a5fa; --green: #22c55e; --red: #ef4444; --yellow: #fbbf24;
+    --green-bg: #064e3b; --red-bg: #7f1d1d; --yellow-bg: #78350f;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
-  h1 { font-size: 22px; margin-bottom: 16px; color: #f8fafc; }
-  h2 { font-size: 16px; margin-bottom: 12px; color: #cbd5e1; }
-  .nav { margin-bottom: 20px; }
-  .nav a { color: #60a5fa; text-decoration: none; margin-right: 16px; font-size: 14px; }
+  body { font-family: -apple-system, "PingFang SC", "SF Pro Text", sans-serif; background: var(--bg); color: var(--text); padding: 24px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
+
+  /* 顶部状态栏 */
+  .top-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; padding: 16px 20px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); }
+  .top-bar .logo { font-size: 22px; font-weight: 700; color: #f8fafc; }
+  .top-bar .logo span { color: var(--primary); }
+  .top-tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+  .tag-ok { background: var(--green-bg); color: #6ee7b7; }
+  .tag-warn { background: var(--yellow-bg); color: #fcd34d; }
+  .tag-err { background: var(--red-bg); color: #fca5a5; }
+  .top-meta { font-size: 12px; color: var(--text3); margin-left: auto; display: flex; gap: 16px; }
+  .top-meta span { white-space: nowrap; }
+
+  /* 导航 */
+  .nav { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+  .nav a { color: var(--primary); text-decoration: none; font-size: 13px; font-weight: 500; }
   .nav a:hover { text-decoration: underline; }
+  .toggle-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text3); margin-left: auto; cursor: pointer; }
+  .toggle-auto input { accent-color: var(--primary); }
+
+  /* 统计卡片 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border-radius: 10px; padding: 16px 18px; border: 1px solid var(--border); }
+  .stat-card .num { font-size: 26px; font-weight: 700; font-family: "SF Mono", "Menlo", monospace; line-height: 1.2; }
+  .stat-card .label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .c-green { color: #6ee7b7; } .c-red { color: #fca5a5; } .c-yellow { color: #fcd34d; } .c-blue { color: #93c5fd; } .c-white { color: #f8fafc; }
+
+  /* 内容网格 */
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
-  .card { background: #1e293b; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .card { background: var(--surface); border-radius: 10px; padding: 18px 20px; border: 1px solid var(--border); }
   .card-full { grid-column: 1 / -1; }
-  .stat-big { font-size: 28px; font-weight: 700; color: #f8fafc; }
-  .stat-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; margin-top: 4px; }
-  .stat-row { display: flex; gap: 24px; flex-wrap: wrap; }
-  .stat-item { }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 8px 8px; text-align: left; border-bottom: 1px solid #334155; }
-  th { color: #94a3b8; font-weight: 600; font-size: 11px; text-transform: uppercase; }
-  tr:hover { background: #334155; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-ok { background: #065f46; color: #6ee7b7; }
-  .badge-fail { background: #7f1d1d; color: #fca5a5; }
-  .badge-open { background: #78350f; color: #fcd34d; }
-  .badge-closed { background: #064e3b; color: #6ee7b7; }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* 上游状态卡片 */
+  .upstream-list { display: flex; flex-direction: column; gap: 10px; }
+  .upstream-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; background: var(--surface2); }
+  .upstream-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+  .dot-open { background: var(--yellow); box-shadow: 0 0 6px rgba(251,191,36,0.5); }
+  .dot-off { background: var(--text3); }
+  .upstream-info { flex: 1; min-width: 0; }
+  .upstream-name { font-weight: 600; font-size: 14px; }
+  .upstream-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .upstream-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+
+  /* 最近请求 */
+  .current-req { padding: 12px 16px; border-radius: 8px; background: var(--surface2); }
+  .current-req .channel { font-size: 16px; font-weight: 600; }
+  .current-req .detail { font-size: 12px; color: var(--text3); margin-top: 6px; }
+  .pulsing-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; margin-right: 6px; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--text3); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr:hover { background: var(--surface2); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .badge-ok { background: var(--green-bg); color: #6ee7b7; }
+  .badge-fail { background: var(--red-bg); color: #fca5a5; }
+  .badge-open { background: var(--yellow-bg); color: #fcd34d; }
+  .badge-closed { background: var(--green-bg); color: #6ee7b7; }
   .badge-type { background: #1e3a8a; color: #93c5fd; }
-  .current-channel { font-size: 18px; font-weight: 600; color: #fbbf24; }
-  .current-model { font-size: 14px; color: #93c5fd; margin-top: 4px; }
-  .current-time { font-size: 12px; color: #64748b; margin-top: 4px; }
-  .empty { text-align: center; padding: 30px; color: #64748b; }
-  .actions { margin-bottom: 12px; display: flex; gap: 8px; }
-  button { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; background: #334155; color: #e2e8f0; }
-  button:hover { background: #475569; }
-  .toggle-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; margin-left: 12px; }
-  .duration { color: #94a3b8; font-size: 12px; }
-  .num { font-family: "SF Mono", monospace; }
-  .pulsing-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; margin-right: 6px; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .empty { text-align: center; padding: 24px; color: var(--text3); font-size: 13px; }
+  .num { font-family: "SF Mono", "Menlo", monospace; }
+  .scroll { max-height: 360px; overflow-y: auto; }
+  .scroll::-webkit-scrollbar { width: 4px; } .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 </style>
 </head>
 <body>
 
-<h1>📊 API Failover Proxy · 运行监控</h1>
+<div class="top-bar" id="top-bar">
+  <div class="logo">API <span>Failover</span> Proxy</div>
+  <div id="top-tags"></div>
+  <div class="top-meta" id="top-meta"></div>
+</div>
+
 <div class="nav">
   <a href="/admin">🔧 号池管理</a>
   <a href="/monitor">📊 运行监控</a>
   <label class="toggle-auto"><input type="checkbox" id="autoRefresh" checked> 自动刷新（5s）</label>
 </div>
 
+<div class="stats" id="stats"></div>
+
 <div class="grid">
-  <!-- 当前渠道 -->
+  <!-- 上游状态 -->
   <div class="card">
-    <h2>🎯 最近一次请求</h2>
+    <h2>🛡️ 上游状态</h2>
+    <div id="upstreams" class="upstream-list"><div class="empty">加载中...</div></div>
+  </div>
+
+  <!-- 最近一次请求 -->
+  <div class="card">
+    <h2>🎯 最近请求</h2>
     <div id="current-channel"><div class="empty">加载中...</div></div>
-  </div>
-
-  <!-- 汇总统计 -->
-  <div class="card">
-    <h2>📈 今日汇总</h2>
-    <div id="summary"><div class="empty">加载中...</div></div>
-  </div>
-
-  <!-- 熔断状态 -->
-  <div class="card">
-    <h2>🛡️ 熔断器状态</h2>
-    <div id="breakers"><div class="empty">加载中...</div></div>
   </div>
 
   <!-- 用量明细 -->
   <div class="card">
     <h2>📋 用量明细（按上游×模型）</h2>
-    <div id="usage" style="max-height:300px;overflow-y:auto"><div class="empty">加载中...</div></div>
+    <div id="usage" class="scroll"><div class="empty">加载中...</div></div>
   </div>
 
-  <!-- 最近请求 -->
+  <!-- 熔断状态 -->
+  <div class="card">
+    <h2>⚡ 熔断器</h2>
+    <div id="breakers"><div class="empty">加载中...</div></div>
+  </div>
+
+  <!-- 最近请求表 -->
   <div class="card card-full">
     <h2>🕒 最近请求（最新 50 条）</h2>
-    <div id="recent" style="max-height:400px;overflow-y:auto"><div class="empty">加载中...</div></div>
+    <div id="recent" class="scroll"><div class="empty">加载中...</div></div>
   </div>
 </div>
 
 <script>
 const GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
 function headers() { return { 'Authorization': `Bearer ${GATEWAY_KEY}` }; }
-
 function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 function fmtTime(ts) {
   if (!ts) return '-';
-  const d = new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour12: false }) + ' ' + d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  const d = ts > 1e12 ? new Date(ts) : new Date(ts);
+  return d.toLocaleTimeString('zh-CN',{hour12:false}) + ' ' + d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'});
 }
 function fmtAgo(ts) {
   if (!ts) return '-';
-  const diff = Math.floor((Date.now() - ts) / 1000);
+  const diff = Math.floor((Date.now() - (ts > 1e12 ? ts : ts)) / 1000);
   if (diff < 60) return diff + 's 前';
   if (diff < 3600) return Math.floor(diff/60) + 'm 前';
   return Math.floor(diff/3600) + 'h 前';
@@ -107,133 +153,169 @@ function fmtDuration(ms) {
   if (ms < 1000) return ms + 'ms';
   return (ms/1000).toFixed(1) + 's';
 }
-
-async function loadCurrent() {
-  try {
-    const r = await fetch('/monitor/last-upstream', { headers: headers() });
-    const d = await r.json();
-    if (!d.ok) {
-      document.getElementById('current-channel').innerHTML = '<div class="empty">尚无请求记录</div>';
-      return;
-    }
-    const ago = fmtAgo(d.timestamp);
-    document.getElementById('current-channel').innerHTML = `
-      <div><span class="pulsing-dot"></span><span class="current-channel">${esc(d.upstream)}</span> <span class="badge badge-type">${esc(d.upstreamType)}</span></div>
-      <div class="current-model">模型: ${esc(d.usedModel || d.requestModel)}</div>
-      <div class="current-time">${fmtTime(d.timestamp)} · ${ago} · 耗时 ${fmtDuration(d.durationMs)}</div>
-    `;
-  } catch (e) {
-    document.getElementById('current-channel').innerHTML = '<div class="empty">加载失败</div>';
-  }
+function fmtUptime(s) {
+  if (!s) return '-';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  if (h > 24) return Math.floor(h/24) + ' 天 ' + (h%24) + ' 小时';
+  return h + 'h ' + m + 'm';
 }
 
-async function loadSummary() {
+/* 顶部状态栏 */
+async function loadTopBar() {
   try {
-    const r = await fetch('/monitor/recent-requests?limit=200', { headers: headers() });
+    const [hr, rr] = await Promise.all([
+      fetch('/health').then(r=>r.json()),
+      fetch('/monitor/recent-requests?limit=200', {headers:headers()}).then(r=>r.json())
+    ]);
+    const today = new Date().toISOString().slice(0,10);
+    const todayReqs = (rr.requests||[]).filter(x=>(x.timestamp||'').startsWith(today));
+    const fail = todayReqs.filter(x=>!x.success).length;
+    const total = todayReqs.length;
+
+    // tags
+    const tagsEl = document.getElementById('top-tags');
+    let tags = `<span class="top-tag ${fail > 0 ? 'tag-warn' : 'tag-ok'}">${fail > 0 ? '⚠ ' + fail + ' 失败' : '✓ 正常'}</span>`;
+    tags += `<span class="top-tag tag-ok">v${hr.version||'?'}</span>`;
+    tagsEl.innerHTML = tags;
+
+    // meta
+    const metaEl = document.getElementById('top-meta');
+    metaEl.innerHTML = `
+      <span>运行 ${fmtUptime(hr.uptime)}</span>
+      <span>上游 ${hr.upstreams?.length||0}</span>
+    `;
+  } catch(e) {}
+}
+
+/* 统计卡片 */
+async function loadStats() {
+  try {
+    const r = await fetch('/monitor/recent-requests?limit=200', {headers:headers()});
     const d = await r.json();
     const reqs = d.requests || [];
     const today = new Date().toISOString().slice(0,10);
-    const todayReqs = reqs.filter(x => (x.timestamp||'').startsWith(today));
-    const success = todayReqs.filter(x => x.success).length;
-    const fail = todayReqs.filter(x => !x.success).length;
-    const totalDur = todayReqs.reduce((s,x) => s + (x.duration||0), 0);
-    const avgDur = todayReqs.length ? Math.round(totalDur / todayReqs.length) : 0;
-    const inputTokens = todayReqs.reduce((s,x) => s + (x.inputTokens||0), 0);
-    const outputTokens = todayReqs.reduce((s,x) => s + (x.outputTokens||0), 0);
-    document.getElementById('summary').innerHTML = `
-      <div class="stat-row">
-        <div class="stat-item"><div class="stat-big">${todayReqs.length}</div><div class="stat-label">今日请求</div></div>
-        <div class="stat-item"><div class="stat-big" style="color:#6ee7b7">${success}</div><div class="stat-label">成功</div></div>
-        <div class="stat-item"><div class="stat-big" style="color:#fca5a5">${fail}</div><div class="stat-label">失败</div></div>
-        <div class="stat-item"><div class="stat-big">${fmtDuration(avgDur)}</div><div class="stat-label">平均耗时</div></div>
-      </div>
-      <div class="stat-row" style="margin-top:16px">
-        <div class="stat-item"><div class="stat-big num">${inputTokens.toLocaleString()}</div><div class="stat-label">输入 tokens</div></div>
-        <div class="stat-item"><div class="stat-big num">${outputTokens.toLocaleString()}</div><div class="stat-label">输出 tokens</div></div>
-      </div>
+    const t = reqs.filter(x=>(x.timestamp||'').startsWith(today));
+    const ok = t.filter(x=>x.success).length;
+    const fail = t.filter(x=>!x.success).length;
+    const avg = t.length ? Math.round(t.reduce((s,x)=>s+(x.duration||0),0)/t.length) : 0;
+    const inTok = t.reduce((s,x)=>s+(x.inputTokens||0),0);
+    const outTok = t.reduce((s,x)=>s+(x.outputTokens||0),0);
+    const rate = t.length ? ((ok/t.length)*100).toFixed(1) : '-';
+    document.getElementById('stats').innerHTML = `
+      <div class="stat-card"><div class="num c-white">${t.length}</div><div class="label">今日请求</div></div>
+      <div class="stat-card"><div class="num c-green">${ok}</div><div class="label">成功</div></div>
+      <div class="stat-card"><div class="num c-red">${fail}</div><div class="label">失败</div></div>
+      <div class="stat-card"><div class="num c-blue">${rate}%</div><div class="label">成功率</div></div>
+      <div class="stat-card"><div class="num c-white">${fmtDuration(avg)}</div><div class="label">平均耗时</div></div>
+      <div class="stat-card"><div class="num c-yellow">${inTok.toLocaleString()}</div><div class="label">输入 tokens</div></div>
+      <div class="stat-card"><div class="num c-blue">${outTok.toLocaleString()}</div><div class="label">输出 tokens</div></div>
     `;
-  } catch (e) {
-    document.getElementById('summary').innerHTML = '<div class="empty">加载失败</div>';
-  }
+  } catch(e) { document.getElementById('stats').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
+/* 上游状态 */
+async function loadUpstreams() {
+  try {
+    const [hr, br] = await Promise.all([
+      fetch('/health').then(r=>r.json()),
+      fetch('/monitor/breakers', {headers:headers()}).then(r=>r.json())
+    ]);
+    const ups = hr.upstreams || [];
+    const bMap = {};
+    (br.breakers||[]).forEach(b => bMap[b.name] = b);
+    if (!ups.length) { document.getElementById('upstreams').innerHTML = '<div class="empty">无上游</div>'; return; }
+    document.getElementById('upstreams').innerHTML = ups.map(u => {
+      const b = bMap[u.name];
+      const open = b && b.open;
+      const dotCls = open ? 'dot-open' : 'dot-ok';
+      const badge = open
+        ? `<span class="upstream-badge badge-open">熔断 ${b.cooldownRemaining}s</span>`
+        : `<span class="upstream-badge badge-closed">在线</span>`;
+      const fails = b ? `${b.fails}/${b.failThreshold}` : '0/5';
+      return `<div class="upstream-item">
+        <div class="upstream-dot ${dotCls}"></div>
+        <div class="upstream-info">
+          <div class="upstream-name">${esc(u.name)}</div>
+          <div class="upstream-meta">${esc(u.type)} · 失败 ${fails}</div>
+        </div>
+        ${badge}
+      </div>`;
+    }).join('');
+  } catch(e) { document.getElementById('upstreams').innerHTML = '<div class="empty">加载失败</div>'; }
+}
+
+/* 最近一次请求 */
+async function loadCurrent() {
+  try {
+    const r = await fetch('/monitor/last-upstream', {headers:headers()});
+    const d = await r.json();
+    if (!d.ok) { document.getElementById('current-channel').innerHTML = '<div class="empty">尚无请求记录</div>'; return; }
+    const ago = fmtAgo(d.timestamp);
+    document.getElementById('current-channel').innerHTML = `
+      <div class="current-req">
+        <div class="channel"><span class="pulsing-dot"></span>${esc(d.upstream)} <span class="badge badge-type">${esc(d.upstreamType)}</span></div>
+        <div class="detail">模型: ${esc(d.usedModel||d.requestModel)} · ${fmtTime(d.timestamp)} · ${ago} · 耗时 ${fmtDuration(d.durationMs)}</div>
+      </div>`;
+  } catch(e) { document.getElementById('current-channel').innerHTML = '<div class="empty">加载失败</div>'; }
+}
+
+/* 熔断器 */
 async function loadBreakers() {
   try {
-    const r = await fetch('/monitor/breakers', { headers: headers() });
+    const r = await fetch('/monitor/breakers', {headers:headers()});
     const d = await r.json();
     const bs = d.breakers || [];
-    if (bs.length === 0) {
-      document.getElementById('breakers').innerHTML = '<div class="empty">无熔断记录（所有上游正常）</div>';
-      return;
-    }
-    let html = '<table><thead><tr><th>上游</th><th>连续失败</th><th>阈值</th><th>状态</th><th>冷却剩余</th></tr></thead><tbody>';
+    if (!bs.length) { document.getElementById('breakers').innerHTML = '<div class="empty">无熔断记录（所有上游正常）</div>'; return; }
+    let html = '<table><thead><tr><th>上游</th><th>连续失败</th><th>阈值</th><th>状态</th><th>冷却</th></tr></thead><tbody>';
     bs.forEach(b => {
-      const status = b.open ? `<span class="badge badge-open">熔断中</span>` : `<span class="badge badge-closed">正常</span>`;
-      html += `<tr><td><strong>${esc(b.name)}</strong></td><td class="num">${b.fails}</td><td class="num">${b.failThreshold}</td><td>${status}</td><td>${b.cooldownRemaining > 0 ? b.cooldownRemaining + 's' : '-'}</td></tr>`;
+      const st = b.open ? '<span class="badge badge-open">熔断中</span>' : '<span class="badge badge-closed">正常</span>';
+      html += `<tr><td><strong>${esc(b.name)}</strong></td><td class="num">${b.fails}</td><td class="num">${b.failThreshold}</td><td>${st}</td><td>${b.cooldownRemaining>0?b.cooldownRemaining+'s':'-'}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('breakers').innerHTML = html;
-  } catch (e) {
-    document.getElementById('breakers').innerHTML = '<div class="empty">加载失败</div>';
-  }
+  } catch(e) { document.getElementById('breakers').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
+/* 用量明细 */
 async function loadUsage() {
   try {
-    const r = await fetch('/monitor/usage', { headers: headers() });
+    const r = await fetch('/monitor/usage', {headers:headers()});
     const d = await r.json();
     const rows = d.rows || [];
-    if (rows.length === 0) {
-      document.getElementById('usage').innerHTML = '<div class="empty">无用量数据</div>';
-      return;
-    }
-    let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求数</th><th>失败</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
+    if (!rows.length) { document.getElementById('usage').innerHTML = '<div class="empty">无用量数据</div>'; return; }
+    let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求</th><th>失败</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
     rows.forEach(r => {
-      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:12px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${(r.inputTokens||0).toLocaleString()}</td><td class="num">${(r.outputTokens||0).toLocaleString()}</td></tr>`;
+      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${(r.inputTokens||0).toLocaleString()}</td><td class="num">${(r.outputTokens||0).toLocaleString()}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('usage').innerHTML = html;
-  } catch (e) {
-    document.getElementById('usage').innerHTML = '<div class="empty">加载失败</div>';
-  }
+  } catch(e) { document.getElementById('usage').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
+/* 最近请求表 */
 async function loadRecent() {
   try {
-    const r = await fetch('/monitor/recent-requests?limit=50', { headers: headers() });
+    const r = await fetch('/monitor/recent-requests?limit=50', {headers:headers()});
     const d = await r.json();
     const reqs = d.requests || [];
-    if (reqs.length === 0) {
-      document.getElementById('recent').innerHTML = '<div class="empty">无请求记录</div>';
-      return;
-    }
+    if (!reqs.length) { document.getElementById('recent').innerHTML = '<div class="empty">无请求记录</div>'; return; }
     let html = '<table><thead><tr><th>时间</th><th>上游</th><th>类型</th><th>模型</th><th>状态</th><th>耗时</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
     reqs.forEach(r => {
-      const status = r.success ? `<span class="badge badge-ok">成功</span>` : `<span class="badge badge-fail">失败</span>`;
-      html += `<tr><td style="font-size:12px">${fmtTime(r.timestamp)}</td><td><strong>${esc(r.upstream)}</strong></td><td><span class="badge badge-type">${esc(r.upstreamType)}</span></td><td style="font-size:12px">${esc(r.model)}</td><td>${status}</td><td class="duration">${fmtDuration(r.duration)}</td><td class="num">${(r.inputTokens||0)}</td><td class="num">${(r.outputTokens||0)}</td></tr>`;
+      const st = r.success ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-fail">失败</span>';
+      const rowBg = r.success ? '' : 'style="background:rgba(239,68,68,0.05)"';
+      html += `<tr ${rowBg}><td style="font-size:11px">${fmtAgo(r.timestamp)}</td><td><strong>${esc(r.upstream)}</strong></td><td><span class="badge badge-type">${esc(r.upstreamType)}</span></td><td style="font-size:11px">${esc(r.model)}</td><td>${st}</td><td class="num">${fmtDuration(r.duration)}</td><td class="num">${r.inputTokens||0}</td><td class="num">${r.outputTokens||0}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('recent').innerHTML = html;
-  } catch (e) {
-    document.getElementById('recent').innerHTML = '<div class="empty">加载失败</div>';
-  }
+  } catch(e) { document.getElementById('recent').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
-function loadAll() {
-  loadCurrent();
-  loadSummary();
-  loadBreakers();
-  loadUsage();
-  loadRecent();
-}
-
+function loadAll() { loadTopBar(); loadStats(); loadUpstreams(); loadCurrent(); loadBreakers(); loadUsage(); loadRecent(); }
 loadAll();
 let timer = null;
 function setupAuto() {
   if (timer) { clearInterval(timer); timer = null; }
-  if (document.getElementById('autoRefresh').checked) {
-    timer = setInterval(loadAll, 5000);
-  }
+  if (document.getElementById('autoRefresh').checked) timer = setInterval(loadAll, 5000);
 }
 document.getElementById('autoRefresh').addEventListener('change', setupAuto);
 setupAuto();
