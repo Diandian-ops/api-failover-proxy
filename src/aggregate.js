@@ -1,6 +1,8 @@
 // SSE 流式响应聚合器：把 SSE 流聚合成完整的 JSON 响应
 // 用于 forceStream 场景（如讯飞只支持流式，但客户端要非流式）
 
+import { normalizeUsage } from './cache/usage.js'
+
 /**
  * Anthropic SSE 流 → Anthropic 非流式 JSON
  * 解析 message_start / content_block_start / content_block_delta / content_block_stop / message_delta / message_stop
@@ -15,7 +17,7 @@ export class AnthropicStreamAggregator {
       model: '',
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 }
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
     }
     this.currentBlock = null
     this.toolInputBuffer = ''
@@ -66,7 +68,12 @@ export class AnthropicStreamAggregator {
         const msg = json.message || {}
         this.result.id = msg.id || ''
         this.result.model = msg.model || ''
-        this.result.usage.input_tokens = msg.usage?.input_tokens || 0
+        if (msg.usage) {
+          const n = normalizeUsage(msg.usage)
+          this.result.usage.input_tokens = n.input
+          this.result.usage.cache_read_input_tokens = n.cacheRead
+          this.result.usage.cache_creation_input_tokens = n.cacheCreation
+        }
         break
       }
       case 'content_block_start': {
@@ -114,7 +121,13 @@ export class AnthropicStreamAggregator {
         const delta = json.delta || {}
         if (delta.stop_reason) this.result.stop_reason = delta.stop_reason
         if (delta.stop_sequence !== undefined) this.result.stop_sequence = delta.stop_sequence
-        if (json.usage?.output_tokens) this.result.usage.output_tokens = json.usage.output_tokens
+        if (json.usage) {
+          const n = normalizeUsage(json.usage)
+          if (n.output) this.result.usage.output_tokens = n.output
+          if (n.input) this.result.usage.input_tokens = n.input
+          if (n.cacheRead) this.result.usage.cache_read_input_tokens = n.cacheRead
+          if (n.cacheCreation) this.result.usage.cache_creation_input_tokens = n.cacheCreation
+        }
         break
       }
       case 'message_stop': {
@@ -139,7 +152,7 @@ export class OpenAIStreamAggregator {
         message: { role: 'assistant', content: '' },
         finish_reason: null
       }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 }
     }
     this.toolCalls = []
     this.buffer = ''
@@ -191,6 +204,15 @@ export class OpenAIStreamAggregator {
     if (!this.result.id && json.id) this.result.id = json.id
     if (json.model && !this.model) this.model = json.model
 
+    // usage 提取必须在 choice 检查之前：流末尾 usage chunk 的 choices 可能为空
+    if (json.usage) {
+      const n = normalizeUsage(json.usage)
+      this.result.usage.prompt_tokens = n.input
+      this.result.usage.completion_tokens = n.output
+      this.result.usage.cache_read_tokens = n.cacheRead
+      this.result.usage.cache_creation_tokens = n.cacheCreation
+    }
+
     const choice = json.choices?.[0]
     if (!choice) return
 
@@ -217,10 +239,6 @@ export class OpenAIStreamAggregator {
     }
     if (choice.finish_reason) {
       this.result.choices[0].finish_reason = choice.finish_reason
-    }
-    if (json.usage) {
-      this.result.usage.prompt_tokens = json.usage.prompt_tokens || 0
-      this.result.usage.completion_tokens = json.usage.completion_tokens || 0
     }
   }
 }

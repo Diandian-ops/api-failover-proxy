@@ -59,10 +59,12 @@ export function getUsageSummary() {
       try {
         const e = JSON.parse(line)
         const key = `${e.date}|${e.upstream}|${e.model}`
-        if (!summary[key]) summary[key] = { requests: 0, inputTokens: 0, outputTokens: 0, fails: 0 }
+        if (!summary[key]) summary[key] = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, fails: 0 }
         summary[key].requests += 1
         summary[key].inputTokens += e.inputTokens || 0
         summary[key].outputTokens += e.outputTokens || 0
+        summary[key].cacheReadTokens += e.cacheReadTokens || 0
+        summary[key].cacheCreationTokens += e.cacheCreationTokens || 0
         if (e.success === false) summary[key].fails += 1
       } catch {}
     }

@@ -43,7 +43,7 @@ router.get('/today-stats', (req, res) => {
     const files = fs.readdirSync(LOG_DIR)
       .filter(f => f.startsWith('requests-'))
       .sort().reverse()
-    let total = 0, ok = 0, fail = 0, totalDur = 0, inTok = 0, outTok = 0
+    let total = 0, ok = 0, fail = 0, totalDur = 0, inTok = 0, outTok = 0, cacheRead = 0, cacheCreate = 0
     for (const f of files) {
       const lines = fs.readFileSync(path.join(LOG_DIR, f), 'utf8').split('\n').filter(Boolean)
       for (const line of lines) {
@@ -55,12 +55,16 @@ router.get('/today-stats', (req, res) => {
           totalDur += e.duration || 0
           inTok += e.inputTokens || 0
           outTok += e.outputTokens || 0
+          cacheRead += e.cacheReadTokens || 0
+          cacheCreate += e.cacheCreationTokens || 0
         } catch {}
       }
     }
     const avg = total ? Math.round(totalDur / total) : 0
     const rate = total ? ((ok / total) * 100).toFixed(1) : '-'
-    res.json({ ok: true, today, total, ok, fail, rate, avgDuration: avg, inputTokens: inTok, outputTokens: outTok })
+    // 节省成本估算：命中部分按 0.1x（原 1x），即省 0.9x；写入按 1.25x（-0.25x）
+    const saved = Math.round(cacheRead * 0.9 - cacheCreate * 0.25)
+    res.json({ ok: true, today, total, ok, fail, rate, avgDuration: avg, inputTokens: inTok, outputTokens: outTok, cacheReadTokens: cacheRead, cacheCreationTokens: cacheCreate, savedTokens: saved })
   } catch (e) {
     res.status(500).json({ error: { message: e.message } })
   }

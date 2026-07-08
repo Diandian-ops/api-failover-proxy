@@ -4,6 +4,7 @@
 // ============================================================
 
 import { log } from './logger.js'
+import { normalizeUsage } from './cache/usage.js'
 
 // ----------------------------------------------------------
 //  请求转换
@@ -375,6 +376,8 @@ export class OpenAIToAnthropicStreamConverter {
     this.currentBlockType = null // 'text' | 'tool_use'
     this.outputTokens = 0
     this.inputTokens = 0
+    this.cacheReadTokens = 0
+    this.cacheCreationTokens = 0
     this.buffer = ''
     this.toolCallIndex = -1
     this.toolCallBuffers = [] // {id, name, argsBuffer}
@@ -478,7 +481,10 @@ export class OpenAIToAnthropicStreamConverter {
     // 首次：发送 message_start
     if (!this.started) {
       this.started = true
-      this.inputTokens = json.usage?.prompt_tokens || 0
+      const n0 = normalizeUsage(json.usage)
+      this.inputTokens = n0.input
+      this.cacheReadTokens = n0.cacheRead
+      this.cacheCreationTokens = n0.cacheCreation
       let out = this._sseEvent('message_start', {
         type: 'message_start',
         message: {
@@ -557,11 +563,12 @@ export class OpenAIToAnthropicStreamConverter {
         content_filter: 'end_turn'
       }
       const stopReason = stopReasonMap[choice.finish_reason] || 'end_turn'
-      if (json.usage?.completion_tokens) {
-        this.outputTokens = json.usage.completion_tokens
-      }
-      if (json.usage?.prompt_tokens) {
-        this.inputTokens = json.usage.prompt_tokens
+      if (json.usage) {
+        const n = normalizeUsage(json.usage)
+        if (n.output) this.outputTokens = n.output
+        if (n.input) this.inputTokens = n.input
+        if (n.cacheRead) this.cacheReadTokens = n.cacheRead
+        if (n.cacheCreation) this.cacheCreationTokens = n.cacheCreation
       }
       out += this._sseEvent('message_delta', {
         type: 'message_delta',
@@ -624,6 +631,8 @@ export class AnthropicToOpenAIStreamConverter {
     this.id = `chatcmpl-${Date.now()}`
     this.inputTokens = 0
     this.outputTokens = 0
+    this.cacheReadTokens = 0
+    this.cacheCreationTokens = 0
   }
 
   feed(chunk) {
@@ -683,7 +692,12 @@ export class AnthropicToOpenAIStreamConverter {
     switch (json.type || eventType) {
       case 'message_start': {
         this.started = true
-        if (json.message?.usage?.input_tokens) this.inputTokens = json.message.usage.input_tokens
+        if (json.message?.usage) {
+          const n = normalizeUsage(json.message.usage)
+          this.inputTokens = n.input
+          this.cacheReadTokens = n.cacheRead
+          this.cacheCreationTokens = n.cacheCreation
+        }
         // 发送初始 chunk（role: assistant）
         out += this._openAIChunk({ role: 'assistant' }, null)
         break
@@ -732,8 +746,13 @@ export class AnthropicToOpenAIStreamConverter {
 
       case 'message_delta': {
         const stopReason = json.delta?.stop_reason
-        if (json.usage?.input_tokens) this.inputTokens = json.usage.input_tokens
-        if (json.usage?.output_tokens) this.outputTokens = json.usage.output_tokens
+        if (json.usage) {
+          const n = normalizeUsage(json.usage)
+          if (n.input) this.inputTokens = n.input
+          if (n.output) this.outputTokens = n.output
+          if (n.cacheRead) this.cacheReadTokens = n.cacheRead
+          if (n.cacheCreation) this.cacheCreationTokens = n.cacheCreation
+        }
         const finishMap = {
           end_turn: 'stop',
           max_tokens: 'length',

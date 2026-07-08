@@ -1,5 +1,6 @@
 // 上游请求转发核心：负责把请求体发给指定上游，处理超时、SSE 流式、错误判定
 import { log } from './logger.js'
+import { normalizeUsage } from './cache/usage.js'
 
 /**
  * 判定是否应该重试该上游
@@ -94,6 +95,8 @@ export class StreamForwarder {
     this.bytesSent = 0
     this.inputTokens = 0
     this.outputTokens = 0
+    this.cacheReadTokens = 0
+    this.cacheCreationTokens = 0
     this.stallTimer = null
     this.done = false
     this.aborted = false
@@ -203,27 +206,40 @@ export class StreamForwarder {
   }
 
   /**
-   * 从单个 SSE 事件的 JSON 提取 usage，累加到 inputTokens/outputTokens
-   * 口径与 aggregate.js 一致：
-   *   Anthropic message_start → message.usage.input_tokens
-   *   Anthropic message_delta → usage.output_tokens
-   *   OpenAI 顶层 usage（带 prompt_tokens/completion_tokens）→ 取之
+   * 从单个 SSE 事件的 JSON 提取 usage，累加到 inputTokens/outputTokens/cache*
+   * 口径与 aggregate.js 一致，经 normalizeUsage 统一各协议字段名：
+   *   Anthropic message_start → message.usage.input_tokens（+ cache_read/creation）
+   *   Anthropic message_delta → usage.output_tokens（部分上游如讯飞也在此给 input）
+   *   OpenAI 顶层 usage（prompt_tokens/completion_tokens + prompt_tokens_details.cached_tokens）
    */
   _extractUsage(json, eventType) {
     if (!json || typeof json !== 'object') return
     if (eventType === 'message_start' || json.type === 'message_start') {
       const u = json.message?.usage
-      if (u?.input_tokens) this.inputTokens = u.input_tokens
-      if (u?.output_tokens) this.outputTokens = u.output_tokens
+      if (u) {
+        const n = normalizeUsage(u)
+        if (n.input) this.inputTokens = n.input
+        if (n.output) this.outputTokens = n.output
+        this.cacheReadTokens = n.cacheRead
+        this.cacheCreationTokens = n.cacheCreation
+      }
     } else if (eventType === 'message_delta' || json.type === 'message_delta') {
-      // 部分上游（如讯飞）在 message_delta 里才给出最终的 input_tokens/output_tokens
-      if (json.usage?.input_tokens) this.inputTokens = json.usage.input_tokens
-      if (json.usage?.output_tokens) this.outputTokens = json.usage.output_tokens
+      // 部分上游（如讯飞）在 message_delta 里才给出最终的 input/output tokens
+      if (json.usage) {
+        const n = normalizeUsage(json.usage)
+        if (n.input) this.inputTokens = n.input
+        if (n.output) this.outputTokens = n.output
+        if (n.cacheRead) this.cacheReadTokens = n.cacheRead
+        if (n.cacheCreation) this.cacheCreationTokens = n.cacheCreation
+      }
     }
     // OpenAI 流末尾 usage chunk（无 choices 或 choices 空时仍带 usage）
     if (json.usage) {
-      if (json.usage.prompt_tokens) this.inputTokens = json.usage.prompt_tokens
-      if (json.usage.completion_tokens) this.outputTokens = json.usage.completion_tokens
+      const n = normalizeUsage(json.usage)
+      if (n.input) this.inputTokens = n.input
+      if (n.output) this.outputTokens = n.output
+      if (n.cacheRead) this.cacheReadTokens = n.cacheRead
+      if (n.cacheCreation) this.cacheCreationTokens = n.cacheCreation
     }
   }
 
@@ -297,9 +313,11 @@ export class StreamForwarder {
           this.res.write(buf)
           this.bytesSent += buf.length
         }
-        // 转换器内部已累加 inputTokens/outputTokens，读到 forwarder 上
+        // 转换器内部已累加 input/output/cache tokens，读到 forwarder 上
         if (typeof converter.inputTokens === 'number') this.inputTokens = converter.inputTokens
         if (typeof converter.outputTokens === 'number') this.outputTokens = converter.outputTokens
+        if (typeof converter.cacheReadTokens === 'number') this.cacheReadTokens = converter.cacheReadTokens
+        if (typeof converter.cacheCreationTokens === 'number') this.cacheCreationTokens = converter.cacheCreationTokens
       }
       this.done = true
       if (this.stallTimer) clearTimeout(this.stallTimer)

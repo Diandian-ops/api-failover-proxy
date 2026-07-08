@@ -208,6 +208,8 @@ async function loadStats() {
       <div class="stat-card"><div class="num c-white">${fmtDuration(d.avgDuration)}</div><div class="label">平均耗时</div></div>
       <div class="stat-card"><div class="num c-yellow">${fmtNum(d.inputTokens)}</div><div class="label">输入 tokens</div></div>
       <div class="stat-card"><div class="num c-blue">${fmtNum(d.outputTokens)}</div><div class="label">输出 tokens</div></div>
+      <div class="stat-card"><div class="num c-green">${fmtNum(d.cacheReadTokens||0)}</div><div class="label">缓存命中 tok</div></div>
+      <div class="stat-card"><div class="num ${d.savedTokens>0?'c-green':'c-yellow'}">${fmtNum(d.savedTokens||0)}</div><div class="label">估算节省 tok</div></div>
     `;
   } catch(e) { document.getElementById('stats').innerHTML = '<div class="empty">加载失败</div>'; }
 }
@@ -282,9 +284,11 @@ async function loadUsage() {
     const d = await r.json();
     const rows = d.rows || [];
     if (!rows.length) { document.getElementById('usage').innerHTML = '<div class="empty">无用量数据</div>'; return; }
-    let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求</th><th>失败</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求</th><th>失败</th><th>输入tok</th><th>输出tok</th><th>缓存命中</th></tr></thead><tbody>';
     rows.forEach(r => {
-      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${fmtNum(r.inputTokens||0)}</td><td class="num">${fmtNum(r.outputTokens||0)}</td></tr>`;
+      const cacheHit = r.cacheReadTokens || 0;
+      const hitBadge = cacheHit > 0 ? `<span class="badge badge-ok">${fmtNum(cacheHit)}</span>` : '<span style="color:var(--text3)">-</span>';
+      html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${fmtNum(r.inputTokens||0)}</td><td class="num">${fmtNum(r.outputTokens||0)}</td><td class="num">${hitBadge}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('usage').innerHTML = html;
@@ -298,11 +302,12 @@ async function loadRecent() {
     const d = await r.json();
     const reqs = d.requests || [];
     if (!reqs.length) { document.getElementById('recent').innerHTML = '<div class="empty">无请求记录</div>'; return; }
-    let html = '<table><thead><tr><th>时间</th><th>上游</th><th>类型</th><th>模型</th><th>状态</th><th>耗时</th><th>输入tok</th><th>输出tok</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>时间</th><th>上游</th><th>类型</th><th>模型</th><th>状态</th><th>耗时</th><th>输入tok</th><th>输出tok</th><th>缓存</th></tr></thead><tbody>';
     reqs.forEach(r => {
       const st = r.success ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-fail">失败</span>';
       const rowBg = r.success ? '' : 'style="background:rgba(239,68,68,0.05)"';
-      html += `<tr ${rowBg}><td style="font-size:11px">${fmtAgo(r.timestamp)}</td><td><strong>${esc(r.upstream)}</strong></td><td><span class="badge badge-type">${esc(r.upstreamType)}</span></td><td style="font-size:11px">${esc(r.model)}</td><td>${st}</td><td class="num">${fmtDuration(r.duration)}</td><td class="num">${r.inputTokens||0}</td><td class="num">${r.outputTokens||0}</td></tr>`;
+      const cache = r.cacheReadTokens > 0 ? `<span class="badge badge-ok">${fmtNum(r.cacheReadTokens)}</span>` : '-';
+      html += `<tr ${rowBg}><td style="font-size:11px">${fmtAgo(r.timestamp)}</td><td><strong>${esc(r.upstream)}</strong></td><td><span class="badge badge-type">${esc(r.upstreamType)}</span></td><td style="font-size:11px">${esc(r.model)}</td><td>${st}</td><td class="num">${fmtDuration(r.duration)}</td><td class="num">${r.inputTokens||0}</td><td class="num">${r.outputTokens||0}</td><td class="num">${cache}</td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('recent').innerHTML = html;

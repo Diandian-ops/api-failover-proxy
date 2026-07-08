@@ -19,6 +19,7 @@ import {
 } from './convert.js'
 import { logRequest, logUsage } from './usage-log.js'
 import { AnthropicStreamAggregator, OpenAIStreamAggregator } from './aggregate.js'
+import { normalizeUsage } from './cache/usage.js'
 
 /**
  * 根据请求路径判断接口类型
@@ -91,8 +92,10 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
 
   // 绑定 requestId 的用量日志闭包（避免每个调用点都传 requestId）
   const requestId = req.requestId || null
-  const logUsage2 = (upstream, model, success, inputTokens, outputTokens, startTime) =>
-    _logUsage(config, upstream, model, success, inputTokens, outputTokens, startTime, requestId)
+  // 归一化 usage：把各协议 cache_read/cache_creation 字段统一，供计费感知
+  // rawUsage 可为上游原始 usage 或转换后 JSON 的 usage；二者字段名都被 normalizeUsage 覆盖
+  const logUsage2 = (upstream, model, success, usage, startTime) =>
+    _logUsage(config, upstream, model, success, usage, startTime, requestId)
 
   const body = req.body
   if (!body) {
@@ -174,7 +177,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         lastErr = e
         lastStatus = 0
         log.warn(`[dispatch] ${upstream.name} 连接失败: ${e.message}`)
-        logUsage2(upstream, originalModel, false, 0, 0, startTime)
+        logUsage2(upstream, originalModel, false, {}, startTime)
         if (sr < sameRetries) {
           rateLimiter.release(upstream.name)
           await sleep(sameBackoff)
@@ -203,8 +206,8 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
           const dur = Date.now() - startTime
           log.info(`[dispatch] ${upstream.name} 流式完成 ${forwarder.bytesSent}B ${dur}ms`)
           logUsage2(upstream, originalModel, true,
-            forwarder.inputTokens,
-            forwarder.outputTokens || forwarder.bytesSent,
+            { input: forwarder.inputTokens, output: forwarder.outputTokens || forwarder.bytesSent,
+              cacheRead: forwarder.cacheReadTokens, cacheCreation: forwarder.cacheCreationTokens },
             startTime)
           rateLimiter.release(upstream.name)
           return
@@ -218,8 +221,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
           res.status(status).json(aggregated)
           log.info(`[dispatch] ${upstream.name} forceStream 聚合完成 ${dur}ms`)
           logUsage2(upstream, originalModel, true,
-            aggregated.usage?.input_tokens || aggregated.usage?.prompt_tokens || 0,
-            aggregated.usage?.output_tokens || aggregated.usage?.completion_tokens || 0,
+            normalizeUsage(aggregated.usage),
             startTime)
           rateLimiter.release(upstream.name)
           return
@@ -244,8 +246,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         const dur = Date.now() - startTime
         log.info(`[dispatch] ${upstream.name} 非流式完成 status=${status} ${dur}ms`)
         logUsage2(upstream, originalModel, true,
-          outJson.usage?.input_tokens || outJson.usage?.prompt_tokens || 0,
-          outJson.usage?.output_tokens || outJson.usage?.completion_tokens || 0,
+          normalizeUsage(outJson.usage),
           startTime)
         rateLimiter.release(upstream.name)
         return
@@ -256,7 +257,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
       let errText = ''
       try { errText = await response.text() } catch {}
       log.warn(`[dispatch] ${upstream.name} 返回 ${status}${sr < sameRetries ? `，同上游重试` : `，切换下一个上游`}。错误: ${errText.slice(0, 200)}`)
-      logUsage2(upstream, originalModel, false, 0, 0, startTime)
+      logUsage2(upstream, originalModel, false, {}, startTime)
 
       lastStatus = status
       lastErr = new Error(`upstream ${upstream.name} returned ${status}`)
@@ -297,18 +298,29 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
   }
 }
 
-function _logUsage(config, upstream, model, success, inputTokens, outputTokens, startTime, requestId = null) {
+function _logUsage(config, upstream, model, success, usage, startTime, requestId = null) {
   if (!config.usageLog?.enabled) return
   const duration = Date.now() - startTime
+  const u = usage || {}
   logRequest({
     requestId,
     upstream: upstream.name,
     upstreamType: upstream.type,
-    model, success, inputTokens, outputTokens, duration
+    model, success,
+    inputTokens: u.input || 0,
+    outputTokens: u.output || 0,
+    cacheReadTokens: u.cacheRead || 0,
+    cacheCreationTokens: u.cacheCreation || 0,
+    duration
   })
   logUsage({
     upstream: upstream.name,
-    model, success, inputTokens, outputTokens, duration
+    model, success,
+    inputTokens: u.input || 0,
+    outputTokens: u.output || 0,
+    cacheReadTokens: u.cacheRead || 0,
+    cacheCreationTokens: u.cacheCreation || 0,
+    duration
   })
 }
 
