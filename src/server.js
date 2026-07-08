@@ -66,6 +66,31 @@ app.get('/ready', (req, res) => {
   res.json({ ready: true, version, upstreams: config.upstreams.length })
 })
 
+// 模型列表（OpenAI 兼容 /v1/models）：聚合号池所有可用模型，供客户端自动发现
+// 免鉴权（仅返回模型名，无敏感信息），须在鉴权中间件之前注册
+app.get('/v1/models', (req, res) => {
+  const ups = config.upstreams || []
+  const set = new Set()
+  for (const u of ups) {
+    const mm = u.modelMap || {}
+    for (const k of Object.keys(mm)) {
+      // 通配 key（含 *）展开不了具体名，跳过；只收精确名作为可选模型
+      if (!k.includes('*')) set.add(k)
+    }
+    // 无 modelMap 的上游：按协议补默认模型，让客户端有东西可选
+    if (Object.keys(mm).length === 0) {
+      if (u.type === 'anthropic') set.add('claude-3-5-sonnet')
+      else set.add('gpt-4o')
+    }
+  }
+  // 兜底：保证至少有几个常见标准名
+  set.add('claude-3-5-sonnet')
+  set.add('gpt-4o')
+  const now = Math.floor(Date.now() / 1000)
+  const data = Array.from(set).map(id => ({ id, object: 'model', created: now, owned_by: 'api-failover-proxy' }))
+  res.json({ object: 'list', data })
+})
+
 // 请求追踪 ID 中间件：每个请求分配短 ID，写响应头 + 挂到 req，便于排查链路
 import crypto from 'node:crypto'
 app.use((req, res, next) => {

@@ -61,7 +61,7 @@ router.get('/today-stats', (req, res) => {
     const rate = total ? ((ok / total) * 100).toFixed(1) : '-'
     // 节省成本估算：命中部分按 0.1x（原 1x），即省 0.9x；写入按 1.25x（-0.25x）
     const saved = Math.round(cacheRead * 0.9 - cacheCreate * 0.25)
-    res.json({ ok: true, today, total, ok, fail, rate, avgDuration: avg, inputTokens: inTok, outputTokens: outTok, cacheReadTokens: cacheRead, cacheCreationTokens: cacheCreate, savedTokens: saved })
+    res.json({ ok: true, today, total, successCount: ok, fail, rate, avgDuration: avg, inputTokens: inTok, outputTokens: outTok, cacheReadTokens: cacheRead, cacheCreationTokens: cacheCreate, savedTokens: saved })
   } catch (e) {
     res.status(500).json({ error: { message: e.message } })
   }

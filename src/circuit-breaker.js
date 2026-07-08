@@ -32,6 +32,13 @@ export class CircuitBreaker {
 
   recordFail(name) {
     const s = this.state.get(name) || { fails: 0, openUntil: 0 }
+    // 已处于熔断冷却期：只累加计数，不重置 openUntil
+    // 否则健康探测持续失败会反复刷新冷却到期时间，导致永远进不了半开
+    if (s.openUntil && Date.now() < s.openUntil) {
+      s.fails += 1
+      this.state.set(name, s)
+      return
+    }
     s.fails += 1
     this.state.set(name, s)
     if (s.fails >= this.failThreshold) {

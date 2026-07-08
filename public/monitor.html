@@ -116,7 +116,7 @@ async function loadStats() {
     const ups = hr.upstreams?.length || 0;
     document.getElementById('stats').innerHTML = `
       <div class="stat-card"><div class="num c-white">${r.total}</div><div class="label">今日请求</div></div>
-      <div class="stat-card"><div class="num c-green">${r.ok}</div><div class="label">成功</div></div>
+      <div class="stat-card"><div class="num c-green">${r.successCount ?? r.ok ?? 0}</div><div class="label">成功</div></div>
       <div class="stat-card"><div class="num c-red">${r.fail}</div><div class="label">失败</div></div>
       <div class="stat-card"><div class="num c-blue">${r.rate}%</div><div class="label">成功率</div></div>
       <div class="stat-card"><div class="num c-white">${fmtDuration(r.avgDuration)}</div><div class="label">平均耗时</div></div>
