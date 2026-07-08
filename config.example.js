@@ -68,13 +68,19 @@ export default {
   // type: 'anthropic' -> 转发到 {base}/messages
   // name: 任意标识，用于日志
   // weight: 可选，预留加权轮询（当前实现为顺序故障转移）
+  //
+  // modelMap: 把请求里的 model 名映射成该上游实际支持的 model 名
+  //   - 精确匹配：{ "claude-3-5-sonnet": "astron-code-latest" }
+  //   - 通配匹配：{ "claude-3-5-*": "astron-code-latest" }（* 匹配任意后缀）
+  //   精确优先于通配；通配按 key 长度降序取最长前缀；无匹配则原样转发
+  //   场景：客户端发标准模型名，上游用的是自家模型名（如讯飞 astron-code-latest）
+  //   协议转换时此映射只生效一次（在转换前应用），不会重复映射
   upstreams: [
     {
       name: 'openai-primary',
       type: 'openai',
       base: 'https://api.openai.com/v1',
       apiKey: process.env.OPENAI_API_KEY || 'sk-xxxxxxxx',
-      // 可选：固定覆盖的 model 前缀映射，例如把 gpt-4o 路由到该上游时强制使用 gpt-4o-2024-08-06
       modelMap: {}
     },
     {

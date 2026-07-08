@@ -13,7 +13,7 @@ import { normalizeUsage } from './cache/usage.js'
 /**
  * Anthropic 请求体 → OpenAI 请求体
  */
-export function anthropicToOpenAIRequest(body, modelMap = {}) {
+export function anthropicToOpenAIRequest(body) {
   const messages = []
 
   // system 字段 → system message
@@ -31,10 +31,8 @@ export function anthropicToOpenAIRequest(body, modelMap = {}) {
     messages.push(anthropicMessageToOpenAI(msg))
   }
 
-  const mappedModel = modelMap[body.model] || body.model
-
   const result = {
-    model: mappedModel,
+    model: body.model,
     messages,
     max_tokens: body.max_tokens || 4096,
     stream: body.stream || false
@@ -71,7 +69,7 @@ export function anthropicToOpenAIRequest(body, modelMap = {}) {
 /**
  * OpenAI 请求体 → Anthropic 请求体
  */
-export function openaiToAnthropicRequest(body, modelMap = {}) {
+export function openaiToAnthropicRequest(body) {
   const messages = []
   let system = ''
 
@@ -83,10 +81,8 @@ export function openaiToAnthropicRequest(body, modelMap = {}) {
     messages.push(openAIMessageToAnthropic(msg))
   }
 
-  const mappedModel = modelMap[body.model] || body.model
-
   const result = {
-    model: mappedModel,
+    model: body.model,
     messages,
     max_tokens: body.max_tokens || 4096,
     stream: body.stream || false

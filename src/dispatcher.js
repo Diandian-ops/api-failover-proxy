@@ -62,12 +62,29 @@ function weightedShuffle(pool) {
 }
 
 /**
- * 应用 modelMap
+ * 应用 modelMap：把请求里的 model 名映射成上游实际支持的 model 名
+ * 支持两种 key：
+ *   - 精确匹配：{ "claude-3-5-sonnet": "astron-code-latest" }
+ *   - 通配匹配：{ "claude-3-5-*": "astron-code-latest" } （* 匹配任意后缀）
+ * 精确匹配优先于通配；无匹配则原样返回
  */
 function applyModelMap(body, upstream) {
-  if (!upstream.modelMap || Object.keys(upstream.modelMap).length === 0) return body
-  if (body.model && upstream.modelMap[body.model]) {
-    return { ...body, model: upstream.modelMap[body.model] }
+  const map = upstream.modelMap
+  if (!map || Object.keys(map).length === 0) return body
+  const model = body.model
+  if (!model) return body
+  // 1. 精确匹配
+  if (map[model]) {
+    return { ...body, model: map[model] }
+  }
+  // 2. 通配匹配（key 含 *）：按 key 长度降序，最长前缀优先
+  const wildcardKeys = Object.keys(map).filter(k => k.includes('*'))
+  for (const k of wildcardKeys.sort((a, b) => b.length - a.length)) {
+    // 把 glob 风格 * 转成正则 .*，锚定首尾
+    const re = new RegExp('^' + k.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
+    if (re.test(model)) {
+      return { ...body, model: map[k] }
+    }
   }
   return body
 }
@@ -139,9 +156,9 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
 
     if (convert) {
       if (apiType === 'anthropic' && upstream.type === 'openai') {
-        upstreamBody = anthropicToOpenAIRequest(upstreamBody, upstream.modelMap || {})
+        upstreamBody = anthropicToOpenAIRequest(upstreamBody)
       } else if (apiType === 'openai' && upstream.type === 'anthropic') {
-        upstreamBody = openaiToAnthropicRequest(upstreamBody, upstream.modelMap || {})
+        upstreamBody = openaiToAnthropicRequest(upstreamBody)
       }
     }
 
