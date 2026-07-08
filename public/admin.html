@@ -53,11 +53,28 @@
   .preview-wrap { max-height: 240px; overflow: auto; margin-top: 4px; }
   .err-box { color: #dc2626; font-size: 13px; margin-top: 8px; }
   .hint a { color: #2563eb; cursor: pointer; text-decoration: underline; }
+  .key-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .key-bar label { font-size: 13px; font-weight: 600; color: #4b5563; }
+  .key-bar input { flex: 1; min-width: 200px; max-width: 420px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-family: "SF Mono", monospace; font-size: 12px; }
+  .key-bar .key-status { font-size: 12px; padding: 2px 8px; border-radius: 12px; }
+  .key-ok { background: #d1fae5; color: #065f46; }
+  .key-bad { background: #fee2e2; color: #991b1b; }
+  .key-unknown { background: #f3f4f6; color: #6b7280; }
 </style>
 </head>
 <body>
 
 <h1>🔌 API Failover Proxy · 号池管理</h1>
+
+<!-- 网关密钥栏：本机默认弱密钥，云端公网需填强密钥 -->
+<div class="card key-bar">
+  <label>Gateway Key</label>
+  <input type="password" id="key-input" placeholder="sk-...">
+  <button class="btn-secondary" style="padding:6px 12px" onclick="saveKey()">保存</button>
+  <button class="btn-secondary" style="padding:6px 12px" onclick="verifyKey()">验证</button>
+  <span class="key-status key-unknown" id="key-status">未验证</span>
+  <span class="hint" style="font-size:11px">本机默认 sk-1234567890；云端公网需填部署时设的强密钥</span>
+</div>
 
 <div class="card">
   <div class="actions">
@@ -209,11 +226,39 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
+// gatewayKey 可在页面顶部修改并记住到 localStorage
+// 本机默认 sk-1234567890；云端公网需填部署时设的强密钥
+let GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
 const BASE = '';
+document.getElementById('key-input').value = GATEWAY_KEY;
 
 function headers() {
   return { 'Authorization': `Bearer ${GATEWAY_KEY}`, 'Content-Type': 'application/json' };
+}
+function setKeyStatus(cls, text) {
+  const el = document.getElementById('key-status');
+  el.className = `key-status ${cls}`;
+  el.textContent = text;
+}
+async function verifyKey() {
+  setKeyStatus('key-unknown', '验证中...');
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams`, { headers: headers() });
+    if (r.status === 401) { setKeyStatus('key-bad', '密钥错误'); return false; }
+    if (!r.ok) { setKeyStatus('key-bad', '错误 ' + r.status); return false; }
+    const d = await r.json();
+    setKeyStatus('key-ok', `✓ 有效（${d.count} 个上游）`);
+    return true;
+  } catch (e) {
+    setKeyStatus('key-bad', '连接失败');
+    return false;
+  }
+}
+function saveKey() {
+  GATEWAY_KEY = document.getElementById('key-input').value.trim();
+  localStorage.setItem('gatewayKey', GATEWAY_KEY);
+  toast('密钥已保存');
+  verifyKey().then(ok => { if (ok) loadUpstreams(); });
 }
 
 function toast(msg, type = 'success') {
@@ -398,6 +443,7 @@ async function reloadPool() {
 
 loadUpstreams();
 loadClientConfigStatus();
+verifyKey();   // 页面加载自动验证当前密钥有效性
 
 // 多平台客户端配置同步状态
 async function loadClientConfigStatus() {
