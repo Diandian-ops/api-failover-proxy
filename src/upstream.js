@@ -3,6 +3,17 @@ import { log } from './logger.js'
 import { normalizeUsage } from './cache/usage.js'
 
 /**
+ * 空流错误：上游声明 SSE 但流为空（0 字节就 done），尚未向客户端写任何数据时抛出，
+ * 供 dispatcher 捕获后重试/切上游，避免把空响应转发给客户端。
+ */
+export class EmptyStreamError extends Error {
+  constructor(msg = 'upstream stream is empty') {
+    super(msg)
+    this.name = 'EmptyStreamError'
+  }
+}
+
+/**
  * 判定是否应该重试该上游
  * - 网络错误、连接超时、5xx、429 重试
  * - 4xx（除 429）不重试（请求本身有问题）
@@ -111,28 +122,6 @@ export class StreamForwarder {
     this.controller = controller
     const reader = response.body.getReader()
 
-    this.res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    })
-    this.started = true
-
-    const resetStall = () => {
-      if (this.stallTimer) clearTimeout(this.stallTimer)
-      if (this.opts.streamStallTimeout > 0 && !this.done) {
-        this.stallTimer = setTimeout(() => {
-          if (!this.done) {
-            log.warn('[stream] 流式响应超时断流')
-            try { controller.abort(new Error('stream-stall')) } catch {}
-            try { reader.cancel().catch(() => {}) } catch {}
-          }
-        }, this.opts.streamStallTimeout)
-      }
-    }
-    resetStall()
-
     // SSE 缓冲：chunk 可能跨事件边界，按 \n\n 切完整事件再改写 model
     let sseBuffer = ''
     const decode = new TextDecoder()
@@ -149,7 +138,46 @@ export class StreamForwarder {
       }
     }
 
+    // 延迟写 header：先读第一个 chunk，若流为空（直接 done）则抛错供 dispatcher 重试
+    const ensureHeader = () => {
+      if (this.started) return
+      this.res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      })
+      this.started = true
+    }
+
+    const resetStall = () => {
+      if (this.stallTimer) clearTimeout(this.stallTimer)
+      if (this.opts.streamStallTimeout > 0 && !this.done) {
+        this.stallTimer = setTimeout(() => {
+          if (!this.done) {
+            log.warn('[stream] 流式响应超时断流')
+            try { controller.abort(new Error('stream-stall')) } catch {}
+            try { reader.cancel().catch(() => {}) } catch {}
+          }
+        }, this.opts.streamStallTimeout)
+      }
+    }
+    resetStall()
+
     try {
+      // 读第一块：空流则抛 EmptyStreamError（此时还没写 header，可重试）
+      const first = await reader.read()
+      if (first.done && this.bytesSent === 0) {
+        throw new EmptyStreamError()
+      }
+      if (this.aborted) throw new Error('aborted')
+      resetStall()
+      ensureHeader()
+      if (first.value) {
+        sseBuffer += decode.decode(first.value, { stream: true })
+        flushEvents(false)
+      }
+
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -166,6 +194,10 @@ export class StreamForwarder {
     } catch (e) {
       this.done = true
       if (this.stallTimer) clearTimeout(this.stallTimer)
+      // 空流：还没写 header，直接抛出供 dispatcher 重试
+      if (e instanceof EmptyStreamError) {
+        throw e
+      }
       if (this.started && this.bytesSent > 0) {
         log.warn('[stream] 流式中断，已发送部分数据，结束响应', e.message)
         try { this.res.end() } catch {}
@@ -255,20 +287,23 @@ export class StreamForwarder {
     this.controller = controller
     const reader = response.body.getReader()
 
-    this.res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    })
-    this.started = true
-
     // 选择转换器
     let converter = null
     if (apiType === 'anthropic' && upstreamType === 'openai') {
       converter = new OpenAIToAnthropicStreamConverter(requestModel)
     } else if (apiType === 'openai' && upstreamType === 'anthropic') {
       converter = new AnthropicToOpenAIStreamConverter(requestModel)
+    }
+
+    const ensureHeader = () => {
+      if (this.started) return
+      this.res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      })
+      this.started = true
     }
 
     const resetStall = () => {
@@ -286,6 +321,29 @@ export class StreamForwarder {
     resetStall()
 
     try {
+      // 读第一块：空流则抛 EmptyStreamError（此时还没写 header，可重试）
+      const first = await reader.read()
+      if (first.done && this.bytesSent === 0) {
+        throw new EmptyStreamError()
+      }
+      if (this.aborted) throw new Error('aborted')
+      resetStall()
+      ensureHeader()
+      if (first.value) {
+        const chunkStr = new TextDecoder().decode(first.value)
+        if (converter) {
+          const converted = converter.feed(chunkStr)
+          if (converted) {
+            const buf = Buffer.from(converted, 'utf8')
+            this.res.write(buf)
+            this.bytesSent += buf.length
+          }
+        } else {
+          this.res.write(first.value)
+          this.bytesSent += first.value.length
+        }
+      }
+
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -325,6 +383,10 @@ export class StreamForwarder {
     } catch (e) {
       this.done = true
       if (this.stallTimer) clearTimeout(this.stallTimer)
+      // 空流：还没写 header，直接抛出供 dispatcher 重试
+      if (e instanceof EmptyStreamError) {
+        throw e
+      }
       if (this.started && this.bytesSent > 0) {
         log.warn('[stream] 转换流式中断，已发送部分数据', e.message)
         try { this.res.end() } catch {}

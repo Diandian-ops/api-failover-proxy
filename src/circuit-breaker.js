@@ -36,8 +36,16 @@ export class CircuitBreaker {
   recordSuccess(name) {
     const s = this.state.get(name)
     if (s) {
+      // 之前处于熔断或半开状态，记录恢复
+      const wasOpen = s.openUntil > 0
+      const wasHalfOpen = s.fails > 0 && s.openUntil === 0
       s.fails = 0
       s.openUntil = 0
+      if (wasOpen) {
+        log.info(`[breaker] ${name} 熔断后请求成功，已恢复`)
+      } else if (wasHalfOpen) {
+        log.info(`[breaker] ${name} 失败计数清零（半开恢复）`)
+      }
     }
   }
 

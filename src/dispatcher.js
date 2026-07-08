@@ -6,7 +6,8 @@ import {
   sendUpstream,
   isSSEResponse,
   StreamForwarder,
-  readJSON
+  readJSON,
+  EmptyStreamError
 } from './upstream.js'
 import {
   needsConversion,
@@ -198,10 +199,30 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         // ── 客户端要流式 ──
         if (wantStream && isSSEResponse(response)) {
           const forwarder = new StreamForwarder(res, opts)
-          if (convert) {
-            await forwarder.pipeSSEWithConversion(response, controller, apiType, upstream.type, originalModel)
-          } else {
-            await forwarder.pipeSSE(response, controller, requestModel)
+          try {
+            if (convert) {
+              await forwarder.pipeSSEWithConversion(response, controller, apiType, upstream.type, originalModel)
+            } else {
+              await forwarder.pipeSSE(response, controller, requestModel)
+            }
+          } catch (e) {
+            // 空流：尚未向客户端写任何数据，可重试/切上游
+            if (e instanceof EmptyStreamError) {
+              log.warn(`[dispatch] ${upstream.name} 流式响应为空，视为畸形响应`)
+              lastStatus = 502
+              lastErr = new Error(`upstream ${upstream.name} returned empty stream (HTTP 200)`)
+              logUsage2(upstream, originalModel, false, {}, startTime)
+              if (sr >= sameRetries) {
+                attempted.push({ upstream: upstream.name, status: 502, error: 'empty stream' })
+                breaker.recordFail(upstream.name)
+              }
+              if (sr < sameRetries) {
+                await sleep(sameBackoff)
+                continue
+              }
+              break
+            }
+            throw e
           }
           const dur = Date.now() - startTime
           log.info(`[dispatch] ${upstream.name} 流式完成 ${forwarder.bytesSent}B ${dur}ms`)
@@ -216,7 +237,24 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         // ── forceStream 聚合：上游流式，客户端要非流式 ──
         if (forceStream && !wantStream && isSSEResponse(response)) {
           const aggregated = await aggregateSSE(response, apiType, upstream.type, convert, requestModel)
-          if (aggregated && typeof aggregated === 'object') aggregated.model = requestModel
+          // 空聚合结果（上游流为空或无内容）：视为畸形响应，重试/切上游
+          if (!aggregated || typeof aggregated !== 'object' ||
+              (aggregated._raw !== undefined && !aggregated._raw)) {
+            log.warn(`[dispatch] ${upstream.name} forceStream 聚合结果为空，视为畸形响应`)
+            lastStatus = 502
+            lastErr = new Error(`upstream ${upstream.name} returned empty aggregation (HTTP 200)`)
+            logUsage2(upstream, originalModel, false, {}, startTime)
+            if (sr >= sameRetries) {
+              attempted.push({ upstream: upstream.name, status: 502, error: 'empty aggregation' })
+              breaker.recordFail(upstream.name)
+            }
+            if (sr < sameRetries) {
+              await sleep(sameBackoff)
+              continue
+            }
+            break
+          }
+          if (typeof aggregated === 'object') aggregated.model = requestModel
           const dur = Date.now() - startTime
           res.status(status).json(aggregated)
           log.info(`[dispatch] ${upstream.name} forceStream 聚合完成 ${dur}ms`)
@@ -232,13 +270,16 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
 
         // 空响应/畸形响应检测：上游返回 200 但 body 为空或非 JSON，
         // 视为上游异常，重试/切上游而不是把空响应转发给客户端
-        if (!json || (json._raw !== undefined && !json._raw)) {
-          log.warn(`[dispatch] ${upstream.name} 返回 200 但响应体为空，视为畸形响应`)
+        const isEmpty = !json || (json._raw !== undefined && !json._raw)
+        const isMalformed = json && json._raw !== undefined && json._raw && !json._raw.trim().startsWith('{') && !json._raw.trim().startsWith('[')
+        if (isEmpty || isMalformed) {
+          const reason = isEmpty ? '响应体为空' : '畸形JSON响应'
+          log.warn(`[dispatch] ${upstream.name} 返回 200 但${reason}，视为畸形响应`)
           lastStatus = 502
-          lastErr = new Error(`upstream ${upstream.name} returned empty body (HTTP 200)`)
+          lastErr = new Error(`upstream ${upstream.name} returned ${isEmpty ? 'empty body' : 'malformed JSON'} (HTTP 200)`)
           logUsage2(upstream, originalModel, false, {}, startTime)
           if (sr >= sameRetries) {
-            attempted.push({ upstream: upstream.name, status: 502, error: 'empty response body' })
+            attempted.push({ upstream: upstream.name, status: 502, error: isEmpty ? 'empty response body' : 'malformed JSON' })
             breaker.recordFail(upstream.name)
           }
           if (sr < sameRetries) {

@@ -39,6 +39,12 @@
     <div id="current-channel"><div class="empty">加载中...</div></div>
   </div>
 
+  <!-- 最近请求列表 -->
+  <div class="card card-full">
+    <h2>📜 请求历史（最近 20 条）</h2>
+    <div id="recent-requests" class="scroll"><div class="empty">加载中...</div></div>
+  </div>
+
   <!-- 用量明细 -->
   <div class="card card-full">
     <h2>📋 用量明细（按上游×模型）</h2>
@@ -184,8 +190,27 @@ async function loadUsage() {
   } catch(e) { document.getElementById('usage').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
+/* 最近请求列表 */
+async function loadRecent() {
+  try {
+    const r = await fetch('/monitor/recent-requests?limit=20', {headers:headers()});
+    const d = await r.json();
+    const reqs = d.requests || [];
+    if (!reqs.length) { document.getElementById('recent-requests').innerHTML = '<div class="empty">无请求记录</div>'; return; }
+    let html = '<table><thead><tr><th>时间</th><th>上游</th><th>模型</th><th>状态</th><th>耗时</th><th>tok(入/出)</th></tr></thead><tbody>';
+    reqs.forEach(e => {
+      const ok = e.success;
+      const statusBadge = ok ? '<span class="badge badge-ok">✓</span>' : '<span class="badge badge-fail">✗</span>';
+      const tok = `${fmtNum(e.inputTokens||0)}/${fmtNum(e.outputTokens||0)}`;
+      html += `<tr><td style="font-size:11px">${fmtTime(e.timestamp)}</td><td><strong>${esc(e.upstream)}</strong></td><td style="font-size:11px">${esc(e.model)}</td><td>${statusBadge}</td><td class="num">${fmtDuration(e.duration)}</td><td class="num" style="font-size:11px">${tok}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('recent-requests').innerHTML = html;
+  } catch(e) { document.getElementById('recent-requests').innerHTML = '<div class="empty">加载失败</div>'; }
+}
+
 /* 最近请求表 */
-function loadAll() { loadStats(); loadUpstreams(); loadCurrent(); loadUsage(); }
+function loadAll() { loadStats(); loadUpstreams(); loadCurrent(); loadRecent(); loadUsage(); }
 loadAll();
 let timer = null;
 function setupAuto() {
