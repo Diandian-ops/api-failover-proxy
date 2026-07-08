@@ -7,6 +7,11 @@
 //   - OpenAI 官方：prompt_tokens_details.cached_tokens（仅命中，无独立写入字段）
 //   - 智谱/火山等自动缓存型：多数在前缀稳定时自动命中，usage 里命中数也走上述字段
 //
+// 口径统一：归一化后 input 恒为"总输入 token"（含缓存命中部分），与 Anthropic 原生口径一致。
+//   - Anthropic：input_tokens 已含 cacheRead，无需处理
+//   - 火山/部分网关：input_tokens 只算未命中部分，cacheRead 单独计 -> 检测到 input < cacheRead
+//     时补 input += cacheRead，使 input 成为总量（监控"输入 tokens"才不会偏小、estimateCost 才准）
+//
 // 估算实际成本（以 input 价为 1 倍）：
 //   output×1 + cacheCreation×1.25 + cacheRead×0.1 + (input - cacheRead - cacheCreation)×1
 // 自动缓存型通常无 1.25 写入惩罚（或不显式计费），命中即省钱。
@@ -18,7 +23,7 @@
  */
 export function normalizeUsage(rawUsage) {
   const u = rawUsage && typeof rawUsage === 'object' ? rawUsage : {}
-  const input = num(u.input_tokens ?? u.prompt_tokens)
+  let input = num(u.input_tokens ?? u.prompt_tokens)
   const output = num(u.output_tokens ?? u.completion_tokens)
   // 命中（读取）：多协议字段名探测，取最先命中的
   const cacheRead = num(
@@ -32,6 +37,11 @@ export function normalizeUsage(rawUsage) {
     u.cache_creation_input_tokens
     ?? u.prompt_cache_miss_tokens
   )
+  // 口径统一：若 input 未包含 cacheRead（火山等分离口径，表现为 input < cacheRead），
+  // 补到 input 使其成为总输入量；避免监控"输入"偏小、成本估算 normal 为负被截断
+  if (cacheRead > input) {
+    input = input + cacheRead
+  }
   return { input, output, cacheRead, cacheCreation }
 }
 
