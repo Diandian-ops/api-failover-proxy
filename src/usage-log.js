@@ -22,8 +22,9 @@ function usageFile() {
  * 记录一次请求
  */
 export function logRequest(entry) {
+  const iso = new Date().toISOString()
   const line = JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: iso,
     ...entry
   }) + '\n'
 
@@ -31,6 +32,24 @@ export function logRequest(entry) {
   fs.appendFile(logFile(), line, err => {
     if (err) console.error('[usage] 写入日志失败:', err.message)
   })
+
+  // 最近一次成功请求摘要（monitor 的"最近请求"卡片读这个文件）
+  // 失败请求不打断"最近成功上游"展示，故只记录成功请求
+  if (entry.success !== false) {
+    const summary = {
+      upstream: entry.upstream,
+      upstreamType: entry.upstreamType,
+      requestModel: entry.model,
+      usedModel: entry.usedModel ?? entry.model,
+      converted: entry.converted === true,
+      stream: entry.stream === true,
+      durationMs: entry.duration,
+      timestamp: Date.parse(iso)
+    }
+    fs.writeFile(path.join(LOG_DIR, 'last-upstream.json'), JSON.stringify(summary), err => {
+      if (err) console.error('[usage] 写入 last-upstream 失败:', err.message)
+    })
+  }
 }
 
 /**

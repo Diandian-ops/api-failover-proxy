@@ -95,8 +95,8 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
   const requestId = req.requestId || null
   // 归一化 usage：把各协议 cache_read/cache_creation 字段统一，供计费感知
   // rawUsage 可为上游原始 usage 或转换后 JSON 的 usage；二者字段名都被 normalizeUsage 覆盖
-  const logUsage2 = (upstream, model, success, usage, startTime) =>
-    _logUsage(config, upstream, model, success, usage, startTime, requestId)
+  const logUsage2 = (upstream, model, success, usage, startTime, ctx = {}) =>
+    _logUsage(config, upstream, model, success, usage, startTime, requestId, ctx)
 
   const body = req.body
   if (!body) {
@@ -178,7 +178,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         lastErr = e
         lastStatus = 0
         log.warn(`[dispatch] ${upstream.name} 连接失败: ${e.message}`)
-        logUsage2(upstream, originalModel, false, {}, startTime)
+        logUsage2(upstream, originalModel, false, {}, startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
         if (sr < sameRetries) {
           rateLimiter.release(upstream.name)
           await sleep(sameBackoff)
@@ -211,7 +211,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
               log.warn(`[dispatch] ${upstream.name} 流式响应为空，视为畸形响应`)
               lastStatus = 502
               lastErr = new Error(`upstream ${upstream.name} returned empty stream (HTTP 200)`)
-              logUsage2(upstream, originalModel, false, {}, startTime)
+              logUsage2(upstream, originalModel, false, {}, startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
               if (sr >= sameRetries) {
                 attempted.push({ upstream: upstream.name, status: 502, error: 'empty stream' })
                 breaker.recordFail(upstream.name)
@@ -229,7 +229,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
           logUsage2(upstream, originalModel, true,
             { input: forwarder.inputTokens, output: forwarder.outputTokens || forwarder.bytesSent,
               cacheRead: forwarder.cacheReadTokens, cacheCreation: forwarder.cacheCreationTokens },
-            startTime)
+            startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
           rateLimiter.release(upstream.name)
           return
         }
@@ -243,7 +243,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
             log.warn(`[dispatch] ${upstream.name} forceStream 聚合结果为空，视为畸形响应`)
             lastStatus = 502
             lastErr = new Error(`upstream ${upstream.name} returned empty aggregation (HTTP 200)`)
-            logUsage2(upstream, originalModel, false, {}, startTime)
+            logUsage2(upstream, originalModel, false, {}, startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
             if (sr >= sameRetries) {
               attempted.push({ upstream: upstream.name, status: 502, error: 'empty aggregation' })
               breaker.recordFail(upstream.name)
@@ -260,7 +260,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
           log.info(`[dispatch] ${upstream.name} forceStream 聚合完成 ${dur}ms`)
           logUsage2(upstream, originalModel, true,
             normalizeUsage(aggregated.usage),
-            startTime)
+            startTime, { usedModel: originalModel, converted: convert, stream: true })
           rateLimiter.release(upstream.name)
           return
         }
@@ -277,7 +277,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
           log.warn(`[dispatch] ${upstream.name} 返回 200 但${reason}，视为畸形响应`)
           lastStatus = 502
           lastErr = new Error(`upstream ${upstream.name} returned ${isEmpty ? 'empty body' : 'malformed JSON'} (HTTP 200)`)
-          logUsage2(upstream, originalModel, false, {}, startTime)
+          logUsage2(upstream, originalModel, false, {}, startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
           if (sr >= sameRetries) {
             attempted.push({ upstream: upstream.name, status: 502, error: isEmpty ? 'empty response body' : 'malformed JSON' })
             breaker.recordFail(upstream.name)
@@ -306,7 +306,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         log.info(`[dispatch] ${upstream.name} 非流式完成 status=${status} ${dur}ms`)
         logUsage2(upstream, originalModel, true,
           normalizeUsage(outJson.usage),
-          startTime)
+          startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
         rateLimiter.release(upstream.name)
         return
       }
@@ -316,7 +316,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
       let errText = ''
       try { errText = await response.text() } catch {}
       log.warn(`[dispatch] ${upstream.name} 返回 ${status}${sr < sameRetries ? `，同上游重试` : `，切换下一个上游`}。错误: ${errText.slice(0, 200)}`)
-      logUsage2(upstream, originalModel, false, {}, startTime)
+      logUsage2(upstream, originalModel, false, {}, startTime, { usedModel: originalModel, converted: convert, stream: wantStream })
 
       lastStatus = status
       lastErr = new Error(`upstream ${upstream.name} returned ${status}`)
@@ -357,7 +357,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
   }
 }
 
-function _logUsage(config, upstream, model, success, usage, startTime, requestId = null) {
+function _logUsage(config, upstream, model, success, usage, startTime, requestId = null, ctx = {}) {
   if (!config.usageLog?.enabled) return
   const duration = Date.now() - startTime
   const u = usage || {}
@@ -366,6 +366,9 @@ function _logUsage(config, upstream, model, success, usage, startTime, requestId
     upstream: upstream.name,
     upstreamType: upstream.type,
     model, success,
+    usedModel: ctx.usedModel ?? model,
+    converted: ctx.converted === true,
+    stream: ctx.stream === true,
     inputTokens: u.input || 0,
     outputTokens: u.output || 0,
     cacheReadTokens: u.cacheRead || 0,
