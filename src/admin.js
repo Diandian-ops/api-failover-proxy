@@ -14,6 +14,7 @@ import {
   getDbPath
 } from './upstream-pool.js'
 import { detectAllPlatforms, syncPlatform, restorePlatform, getSyncStatus, syncClaudeSettings, restoreClaudeSettings } from './sync-client-config.js'
+import { probeUpstream } from './health-probe.js'
 
 const router = Router()
 
@@ -183,6 +184,39 @@ router.delete('/upstreams/:name', (req, res) => {
       ...(r.skipped && { warning: 'DB 中无 enabled 上游，内存保留旧列表' })
     })
   } catch (e) {
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 连通性测试：对单个上游发真实最小请求，准确验证 key（无副作用，不碰熔断器）
+router.post('/upstreams/test-all', async (req, res) => {
+  try {
+    const all = loadAllUpstreams()
+    // real 模式：POST 转发端点最小请求，准确验证 key，耗 1-2 token/上游
+    const results = await Promise.all(all.map(async u => {
+      const r = await probeUpstream(u, 15000, 'real')
+      return { name: u.name, ...r }
+    }))
+    res.json({ ok: true, count: results.length, results })
+  } catch (e) {
+    log.error('[admin] 批量连通性测试失败:', e.message)
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 单个上游连通性测试
+router.post('/upstreams/:name/test', async (req, res) => {
+  try {
+    const all = loadAllUpstreams()
+    const u = all.find(x => x.name === req.params.name)
+    if (!u) {
+      return res.status(404).json({ error: { message: `上游 "${req.params.name}" 不存在` } })
+    }
+    const r = await probeUpstream(u, 15000, 'real')
+    log.info(`[admin] 连通性测试 ${u.name}: ${r.message} (${r.latencyMs}ms)`)
+    res.json({ ok: true, name: u.name, ...r })
+  } catch (e) {
+    log.error('[admin] 连通性测试失败:', e.message)
     res.status(500).json({ error: { message: e.message } })
   }
 })
