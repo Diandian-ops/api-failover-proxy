@@ -93,10 +93,11 @@ function fmtDuration(ms) {
 }
 function fmtNum(n) {
   if (n === 0) return '0';
-  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
-  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return (n/1e3).toFixed(1) + 'k';
-  return n.toString();
+  // 统一用 M（百万）为单位，避免 k/M/B 混用造成视觉跳跃
+  // 千级以上才转 M（保证至少 1 位有效数字）；百级以下原数更易读
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';        // 6.93M
+  if (n >= 1e3) return (n/1e6).toFixed(4) + 'M';        // 0.4823M
+  return n.toString();                                   // 482 / 15 原样显示
 }
 function fmtUptime(s) {
   if (!s) return '-';
