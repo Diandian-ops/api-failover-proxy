@@ -10,6 +10,7 @@ import {
   validateUpstream,
   deleteUpstream,
   toggleUpstream,
+  reorderUpstreams,
   getDbPath
 } from './upstream-pool.js'
 import { detectAllPlatforms, syncPlatform, restorePlatform, getSyncStatus, syncClaudeSettings, restoreClaudeSettings } from './sync-client-config.js'
@@ -131,6 +132,36 @@ router.post('/upstreams/batch', (req, res) => {
     })
   } catch (e) {
     log.error('[admin] 批量导入失败:', e.message)
+    res.status(500).json({ error: { message: e.message } })
+  }
+})
+
+// 重排上游优先级（拖拽排序用）
+// body: { order: ["name1","name2",...] } —— 按新顺序的 name 数组，priority 依次设为 10/20/30…
+router.post('/upstreams/reorder', (req, res) => {
+  const order = req.body?.order
+  if (!Array.isArray(order) || order.length === 0) {
+    return res.status(400).json({ error: { message: 'body 需提供非空 order 数组（按新顺序的 name）' } })
+  }
+  try {
+    const all = loadAllUpstreams().map(u => u.name)
+    const known = new Set(all)
+    // 校验：元素都存在、无重复、数量与号池一致（防漏改导致顺序错乱）
+    const dupes = order.filter((n, i) => order.indexOf(n) !== i)
+    const unknown = order.filter(n => !known.has(n))
+    if (dupes.length || unknown.length || order.length !== all.length) {
+      return res.status(400).json({
+        error: {
+          message: `order 校验失败：${dupes.length ? `重复 ${dupes.join(',')}；` : ''}${unknown.length ? `未知 ${unknown.join(',')}；` : ''}期望 ${all.length} 个，收到 ${order.length} 个`
+        }
+      })
+    }
+    reorderUpstreams(order)
+    log.info(`[admin] 上游重排完成: ${order.join(' → ')}`)
+    const r = applyReload(req.app)
+    res.json({ ok: true, order, reloaded: r.ok, upstreamCount: r.count })
+  } catch (e) {
+    log.error('[admin] 重排失败:', e.message)
     res.status(500).json({ error: { message: e.message } })
   }
 })

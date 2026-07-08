@@ -25,6 +25,12 @@ app.use(express.json({ limit: '10mb' }))
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin.html')))
 app.get('/monitor', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'monitor.html')))
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'monitor.html')))
+// 共享样式（免鉴权静态资源）
+app.get('/shared.css', (req, res) => {
+  res.setHeader('Content-Type', 'text/css; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.sendFile(path.join(__dirname, '..', 'public', 'shared.css'))
+})
 // 健康检查免鉴权，供 Docker healthcheck / 监控探测
 // liveness：进程存活即 ok，附带版本/运行时间/上游/熔断状态
 app.get('/health', (req, res) => {

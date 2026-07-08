@@ -16,3 +16,6 @@ upstreams.db-wal
 
 # 第三方工具自动注入的 skill 链接（与本仓库无关，指向本机路径）
 .aionrs/
+
+# Claude Code 本地工作目录
+.claude/

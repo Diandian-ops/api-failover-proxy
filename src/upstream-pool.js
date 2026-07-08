@@ -159,6 +159,20 @@ export function toggleUpstream(name, enabled) {
   db.prepare('UPDATE upstreams SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name)
 }
 
+// 批量重排优先级：按 names 顺序把 priority 设为 (index+1)*10（10/20/30…，留间隔便于手动微调）
+// names 通常是当前全部 enabled 上游的新顺序；事务原子落盘
+export function reorderUpstreams(names) {
+  if (!db) initPool()
+  if (!Array.isArray(names) || names.length === 0) {
+    throw new Error('order 不能为空')
+  }
+  const tx = db.transaction((items) => {
+    const stmt = db.prepare('UPDATE upstreams SET priority = ? WHERE name = ?')
+    items.forEach((name, i) => stmt.run((i + 1) * 10, name))
+  })
+  tx(names)
+}
+
 export function getDbPath() {
   return dbPath
 }

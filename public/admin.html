@@ -1,88 +1,47 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>API Failover Proxy · 号池管理</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
-  h1 { font-size: 22px; margin-bottom: 16px; }
-  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-  .actions { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
-  button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: opacity 0.2s; }
-  button:hover { opacity: 0.85; }
-  .btn-primary { background: #2563eb; color: #fff; }
-  .btn-success { background: #16a34a; color: #fff; }
-  .btn-danger { background: #dc2626; color: #fff; }
-  .btn-warning { background: #d97706; color: #fff; }
-  .btn-secondary { background: #6b7280; color: #fff; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-  th { background: #f9fafb; font-weight: 600; font-size: 12px; color: #6b7280; text-transform: uppercase; }
-  tr:hover { background: #f9fafb; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-on { background: #d1fae5; color: #065f46; }
-  .badge-off { background: #fee2e2; color: #991b1b; }
-  .badge-type { background: #dbeafe; color: #1e40af; }
-  .badge-flag { background: #fef3c7; color: #92400e; }
-  .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center; }
-  .modal-overlay.show { display: flex; }
-  .modal { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
-  .modal h2 { font-size: 18px; margin-bottom: 16px; }
-  .form-group { margin-bottom: 12px; }
-  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #4b5563; }
-  .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; font-family: inherit; }
-  .form-group textarea { font-family: "SF Mono", monospace; font-size: 12px; min-height: 60px; }
-  .form-group .hint { font-size: 11px; color: #9ca3af; margin-top: 2px; }
-  .form-row { display: flex; gap: 12px; }
-  .form-row .form-group { flex: 1; }
-  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 14px; z-index: 200; opacity: 0; transition: opacity 0.3s; }
-  .toast.show { opacity: 1; }
-  .toast-success { background: #16a34a; }
-  .toast-error { background: #dc2626; }
-  .api-key-cell { font-family: "SF Mono", monospace; font-size: 12px; color: #6b7280; }
-  .model-map-cell { font-family: "SF Mono", monospace; font-size: 11px; color: #6b7280; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { text-align: center; padding: 40px; color: #9ca3af; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-  .tab { padding: 8px 16px; cursor: pointer; font-size: 14px; color: #6b7280; border-bottom: 2px solid transparent; }
-  .tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
-  .tab-pane { margin-top: 8px; }
-  .import-ta { width: 100%; font-family: "SF Mono", monospace; font-size: 12px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; }
-  .preview-wrap { max-height: 240px; overflow: auto; margin-top: 4px; }
-  .err-box { color: #dc2626; font-size: 13px; margin-top: 8px; }
-  .hint a { color: #2563eb; cursor: pointer; text-decoration: underline; }
-  .key-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .key-bar label { font-size: 13px; font-weight: 600; color: #4b5563; }
-  .key-bar input { flex: 1; min-width: 200px; max-width: 420px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-family: "SF Mono", monospace; font-size: 12px; }
-  .key-bar .key-status { font-size: 12px; padding: 2px 8px; border-radius: 12px; }
-  .key-ok { background: #d1fae5; color: #065f46; }
-  .key-bad { background: #fee2e2; color: #991b1b; }
-  .key-unknown { background: #f3f4f6; color: #6b7280; }
-</style>
+<link rel="stylesheet" href="/shared.css">
+<script>
+  // 主题：加载前应用避免闪烁
+  const _t = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', _t);
+</script>
 </head>
 <body>
 
-<h1>🔌 API Failover Proxy · 号池管理</h1>
+<div class="topbar">
+  <div class="brand">API <span>Failover</span> Proxy</div>
+  <nav class="nav">
+    <a href="/admin" class="current">🔧 号池管理</a>
+    <a href="/monitor">📊 运行监控</a>
+  </nav>
+  <div class="nav-spacer"></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换深浅色"><span id="theme-icon">🌙</span></button>
+</div>
+
+<h1>号池管理</h1>
 
 <!-- 网关密钥栏：本机默认弱密钥，云端公网需填强密钥 -->
 <div class="card key-bar">
   <label>Gateway Key</label>
   <input type="password" id="key-input" placeholder="sk-...">
-  <button class="btn-secondary" style="padding:6px 12px" onclick="saveKey()">保存</button>
-  <button class="btn-secondary" style="padding:6px 12px" onclick="verifyKey()">验证</button>
+  <button class="btn btn-secondary btn-sm" onclick="saveKey()">保存</button>
+  <button class="btn btn-secondary btn-sm" onclick="verifyKey()">验证</button>
   <span class="key-status key-unknown" id="key-status">未验证</span>
-  <span class="hint" style="font-size:11px">本机默认 sk-1234567890；云端公网需填部署时设的强密钥</span>
+  <span class="hint">本机默认 sk-1234567890；云端公网需填部署时设的强密钥</span>
 </div>
 
 <div class="card">
   <div class="actions">
-    <button class="btn-primary" onclick="openAddModal()">+ 新增上游</button>
-    <button class="btn-primary" onclick="openImportModal()">📥 批量导入</button>
-    <button class="btn-secondary" onclick="openExportModal()">📤 导出号池</button>
-    <button class="btn-success" onclick="reloadPool()">⟳ 热加载</button>
-    <button class="btn-secondary" onclick="loadUpstreams()">刷新列表</button>
+    <button class="btn btn-primary" onclick="openAddModal()">+ 新增上游</button>
+    <button class="btn btn-primary" onclick="openImportModal()">📥 批量导入</button>
+    <button class="btn btn-secondary" onclick="openExportModal()">📤 导出号池</button>
+    <button class="btn btn-success" onclick="reloadPool()">⟳ 热加载</button>
+    <button class="btn btn-secondary" onclick="loadUpstreams()">刷新列表</button>
   </div>
   <div id="upstream-list">
     <div class="empty">加载中...</div>
@@ -91,10 +50,10 @@
 
 <!-- 客户端配置同步 -->
 <div class="card">
-  <h2 style="font-size:16px;margin-bottom:12px">🖥️ 客户端配置同步</h2>
+  <h2>🖥️ 客户端配置同步</h2>
   <div id="client-config-status"><div class="empty">加载中...</div></div>
   <div class="actions" style="margin-top:12px">
-    <button class="btn-secondary" onclick="loadClientConfigStatus()">刷新状态</button>
+    <button class="btn btn-secondary" onclick="loadClientConfigStatus()">刷新状态</button>
   </div>
 </div>
 
@@ -137,9 +96,9 @@
       </div>
       <div class="form-group">
         <label>选项</label>
-        <div style="display:flex;gap:12px;padding-top:6px">
-          <label style="font-weight:normal;font-size:13px"><input type="checkbox" id="f-forceStream"> forceStream</label>
-          <label style="font-weight:normal;font-size:13px"><input type="checkbox" id="f-enabled" checked> 启用</label>
+        <div class="checks">
+          <label><input type="checkbox" id="f-forceStream"> forceStream</label>
+          <label><input type="checkbox" id="f-enabled" checked> 启用</label>
         </div>
       </div>
     </div>
@@ -161,15 +120,15 @@
       <div class="hint">JSON 格式：请求模型名 → 上游实际模型名</div>
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeModal()">取消</button>
-      <button class="btn-primary" onclick="saveUpstream()">保存</button>
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveUpstream()">保存</button>
     </div>
   </div>
 </div>
 
 <!-- 批量导入模态框 -->
 <div class="modal-overlay" id="import-modal">
-  <div class="modal" style="width:680px">
+  <div class="modal modal-lg">
     <h2>📥 批量导入上游</h2>
     <div class="tabs">
       <div class="tab active" data-tab="json" onclick="switchImportTab('json')">JSON</div>
@@ -177,48 +136,54 @@
     </div>
 
     <div class="tab-pane" id="pane-json">
-      <textarea id="import-json" rows="9" class="import-ta" placeholder='[{"name":"upstream1","type":"anthropic","base":"https://api1.example.com/v1","apiKey":"sk-key1","priority":100,"modelMap":{"claude-3-5-sonnet":"model-a"}}]'></textarea>
+      <textarea id="import-json" rows="9" class="textarea-mono" placeholder='[{"name":"upstream1","type":"anthropic","base":"https://api1.example.com/v1","apiKey":"sk-key1","priority":100,"modelMap":{"claude-3-5-sonnet":"model-a"}}]'></textarea>
       <div class="hint" style="margin-top:4px">JSON 数组，字段同单条新增；同名上游会被覆盖。必填：name / type / base / apiKey</div>
     </div>
 
     <div class="tab-pane" id="pane-csv" style="display:none">
-      <input type="file" accept=".csv,.txt" id="import-file" onchange="loadCsvFile(event)" style="font-size:12px;margin-bottom:8px">
-      <textarea id="import-csv" rows="9" class="import-ta" placeholder="name,type,base,apiKey,weight,forceStream,enabled,priority,sameRetries,sameRetryBackoffMs,modelMap"></textarea>
-      <div class="hint" style="margin-top:4px">首行为表头；必填 name/type/base/apiKey，可选列可省略（用默认值）；modelMap 列填 JSON 字符串，双引号转义为两遍。 <span onclick="fillCsvTemplate()" style="color:#2563eb;cursor:pointer;text-decoration:underline">填入示例</span></div>
+      <input type="file" accept=".csv,.txt" id="import-file" onchange="loadCsvFile(event)" class="btn btn-secondary btn-sm" style="display:inline-block;width:auto;margin-bottom:8px">
+      <textarea id="import-csv" rows="9" class="textarea-mono" placeholder="name,type,base,apiKey,weight,forceStream,enabled,priority,sameRetries,sameRetryBackoffMs,modelMap"></textarea>
+      <div class="hint">首行为表头；必填 name/type/base/apiKey，可选列可省略（用默认值）；modelMap 列填 JSON 字符串，双引号转义为两遍。 <span class="link" onclick="fillCsvTemplate()">填入示例</span></div>
     </div>
 
     <div id="import-preview" style="margin-top:12px"></div>
     <div id="import-errors"></div>
 
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeImportModal()">取消</button>
-      <button class="btn-warning" onclick="previewImport()">预览</button>
-      <button class="btn-primary" onclick="doImport()">导入</button>
+      <button class="btn btn-secondary" onclick="closeImportModal()">取消</button>
+      <button class="btn btn-warning" onclick="previewImport()">预览</button>
+      <button class="btn btn-primary" onclick="doImport()">导入</button>
     </div>
   </div>
 </div>
 
 <!-- 导出号池模态框 -->
 <div class="modal-overlay" id="export-modal">
-  <div class="modal" style="width:680px">
+  <div class="modal modal-lg">
     <h2>📤 导出号池</h2>
     <div class="tabs">
       <div class="tab active" data-tab="exp-json" onclick="switchExportTab('exp-json')">JSON</div>
       <div class="tab" data-tab="exp-csv" onclick="switchExportTab('exp-csv')">CSV</div>
     </div>
     <div class="hint" id="export-summary" style="margin-bottom:8px"></div>
+    <div class="export-toolbar">
+      <span class="ec-count" id="export-selected-count"></span>
+      <button class="btn btn-secondary btn-sm" onclick="exportSelectAll(true)">全选</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportSelectAll(false)">全不选</button>
+    </div>
+    <div class="export-checks" id="export-checks"><div class="empty">加载中...</div></div>
     <div class="tab-pane" id="pane-exp-json">
-      <textarea id="export-json" rows="14" class="import-ta" readonly></textarea>
+      <textarea id="export-json" rows="14" class="textarea-mono" readonly></textarea>
       <div class="hint" style="margin-top:4px">完整号池的 JSON 数组，可直接用于批量导入</div>
     </div>
     <div class="tab-pane" id="pane-exp-csv" style="display:none">
-      <textarea id="export-csv" rows="14" class="import-ta" readonly></textarea>
+      <textarea id="export-csv" rows="14" class="textarea-mono" readonly></textarea>
       <div class="hint" style="margin-top:4px">含表头的 CSV；modelMap 列为 JSON 字符串，可直接粘回 CSV 导入</div>
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeExportModal()">关闭</button>
-      <button class="btn-warning" onclick="copyExport()">📋 复制</button>
-      <button class="btn-primary" onclick="downloadExport()">⬇ 下载文件</button>
+      <button class="btn btn-secondary" onclick="closeExportModal()">关闭</button>
+      <button class="btn btn-warning" onclick="copyExport()">📋 复制</button>
+      <button class="btn btn-primary" onclick="downloadExport()">⬇ 下载文件</button>
     </div>
   </div>
 </div>
@@ -226,6 +191,20 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// 主题切换：深浅色，localStorage 记住
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('theme-icon').textContent = next === 'dark' ? '🌙' : '☀';
+}
+(function initThemeIcon() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const el = document.getElementById('theme-icon');
+  if (el) el.textContent = cur === 'dark' ? '🌙' : '☀';
+})();
+
 // gatewayKey 可在页面顶部修改并记住到 localStorage
 // 本机默认 sk-1234567890；云端公网需填部署时设的强密钥
 let GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
@@ -285,34 +264,87 @@ function renderTable(upstreams) {
     return;
   }
   let html = `<table><thead><tr>
-    <th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>重试</th><th>状态</th>
+    <th class="drag-handle" title="拖拽行排序">⠿</th><th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>重试</th><th>状态</th>
     <th>Base URL</th><th>API Key</th><th>ModelMap</th><th>标记</th><th>操作</th>
   </tr></thead><tbody>`;
   upstreams.forEach((u, i) => {
     const mm = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap) : '';
     const flags = [];
     if (u.forceStream) flags.push('<span class="badge badge-flag">forceStream</span>');
-    html += `<tr>
-      <td>${i+1}</td>
+    // 序号：按 priority 升序后的位置（priority/10 取整，回退到 i+1）
+    const seq = u.priority ? Math.round(u.priority / 10) : (i + 1);
+    html += `<tr draggable="true" data-name="${esc(u.name)}" ondragstart="onDragStart(event)" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)" ondragend="onDragEnd(event)">
+      <td class="drag-handle" title="拖拽排序">⠿</td>
+      <td><span class="seq">#${seq}</span></td>
       <td><strong>${esc(u.name)}</strong></td>
       <td><span class="badge badge-type">${u.type}</span></td>
       <td>${u.priority ?? 100}</td>
-      <td>${u.weight || 1}</td>
-      <td style="font-size:12px">${u.sameRetries ?? 2}×/${u.sameRetryBackoffMs ?? 800}ms</td>
+      <td class="num" title="仅 weighted 策略生效（当前 failover 按 priority 顺序）">${u.weight || 1}</td>
+      <td class="num" style="font-size:11px">${u.sameRetries ?? 2}×/${u.sameRetryBackoffMs ?? 800}ms</td>
       <td><span class="badge ${u.enabled ? 'badge-on' : 'badge-off'}">${u.enabled ? '启用' : '禁用'}</span></td>
-      <td style="font-size:12px">${esc(u.base)}</td>
+      <td style="font-size:11px">${esc(u.base)}</td>
       <td class="api-key-cell">${esc(u.apiKey.slice(0,12))}...</td>
       <td class="model-map-cell" title="${esc(mm)}">${esc(mm)}</td>
       <td>${flags.join('')}</td>
       <td>
-        <button class="btn-warning" style="padding:4px 10px;font-size:12px" onclick="editUpstream('${esc(u.name)}')">编辑</button>
-        <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
-        <button class="btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
+        <button class="btn btn-warning btn-sm" onclick="editUpstream('${esc(u.name)}')">编辑</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
       </td>
     </tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('upstream-list').innerHTML = html;
+}
+
+// ===== 拖拽排序 =====
+let _draggedRow = null;
+function onDragStart(e) {
+  _draggedRow = e.target.closest('tr');
+  _draggedRow.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  // Firefox 需要设置 dataTransfer 才能触发 drag
+  try { e.dataTransfer.setData('text/plain', _draggedRow.dataset.name); } catch {}
+}
+function onDragOver(e) {
+  e.preventDefault();  // 允许 drop
+  const row = e.target.closest('tr');
+  if (row && row !== _draggedRow) row.classList.add('drag-over');
+}
+function onDragLeave(e) {
+  const row = e.target.closest('tr');
+  if (row) row.classList.remove('drag-over');
+}
+async function onDrop(e) {
+  e.preventDefault();
+  const target = e.target.closest('tr');
+  if (!_draggedRow || !target || target === _draggedRow) return;
+  // 把被拖行插到目标行之前
+  target.parentNode.insertBefore(_draggedRow, target);
+  // 收集新顺序
+  const names = Array.from(document.querySelectorAll('#upstream-list tbody tr')).map(tr => tr.dataset.name);
+  await reorderPool(names);
+}
+function onDragEnd() {
+  if (_draggedRow) _draggedRow.classList.remove('dragging');
+  document.querySelectorAll('#upstream-list tr.drag-over').forEach(r => r.classList.remove('drag-over'));
+  _draggedRow = null;
+}
+async function reorderPool(names) {
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/reorder`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ order: names })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || '重排失败');
+    toast(`排序已保存（${names.length} 个上游）`);
+    _upstreamsCache = [];
+    loadUpstreams();
+  } catch (e) {
+    toast('排序失败: ' + e.message, 'error');
+    loadUpstreams();  // 失败则回滚到服务端真实顺序
+  }
 }
 
 function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
@@ -460,14 +492,14 @@ async function loadClientConfigStatus() {
     let html = '<table style="font-size:12px;width:100%"><thead><tr><th>平台</th><th>状态</th><th>备份</th><th>当前配置</th><th>操作</th></tr></thead><tbody>';
     platforms.forEach(p => {
       const badge = p.available
-        ? (p.synced ? '<span class="badge badge-on">已同步</span>' : '<span class="badge badge-off">未同步</span>')
-        : '<span style="font-size:11px;color:#9ca3af">未检测到</span>';
+        ? (p.synced ? '<span class="badge badge-ok">已同步</span>' : '<span class="badge badge-off">未同步</span>')
+        : '<span class="badge" style="background:var(--surface2);color:var(--text3)">未检测到</span>';
       const backup = p.available && p.hasBackup ? '<span class="badge badge-flag">有备份</span>' : '-';
       const current = p.available ? Object.entries(p.current || {}).map(([k,v]) => `${k}=${v}`).join('; ') : '-';
       const actions = p.available
-        ? `<button class="btn-primary" style="padding:2px 8px;font-size:11px" onclick="clientSync('${p.id}','sync')">同步</button> <button class="btn-warning" style="padding:2px 8px;font-size:11px" onclick="clientSync('${p.id}','restore')">恢复</button>`
+        ? `<button class="btn btn-primary btn-sm" onclick="clientSync('${p.id}','sync')">同步</button> <button class="btn btn-warning btn-sm" onclick="clientSync('${p.id}','restore')">恢复</button>`
         : '-';
-      html += `<tr><td><strong>${esc(p.name)}</strong></td><td>${badge}</td><td>${backup}</td><td style="font-family:SF Mono,monospace;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(current)}</td><td>${actions}</td></tr>`;
+      html += `<tr><td><strong>${esc(p.name)}</strong></td><td>${badge}</td><td>${backup}</td><td class="model-map-cell" style="max-width:200px">${esc(current)}</td><td>${actions}</td></tr>`;
     });
     html += '</tbody></table>';
     el.innerHTML = html;
@@ -630,6 +662,7 @@ function fillCsvTemplate() {
 
 // ===== 导出号池 =====
 let _exportCache = [];  // 缓存导出数据，供复制/下载复用
+let _exportSel = new Set();  // 导出勾选的渠道名集合
 function closeExportModal() {
   document.getElementById('export-modal').classList.remove('show');
 }
@@ -662,23 +695,67 @@ async function openExportModal() {
   document.getElementById('export-json').value = '加载中...';
   document.getElementById('export-csv').value = '';
   document.getElementById('export-summary').textContent = '';
+  document.getElementById('export-checks').innerHTML = '<div class="empty">加载中...</div>';
   try {
     const r = await fetch(`${BASE}/admin/upstreams`, { headers: headers() });
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
     _exportCache = d.upstreams || [];
+    _exportSel = new Set(_exportCache.map(u => u.name));  // 默认全选
     document.getElementById('export-summary').textContent = `共 ${_exportCache.length} 个上游（含禁用的）`;
-    document.getElementById('export-json').value = JSON.stringify(_exportCache.map(u => ({
-      name: u.name, type: u.type, base: u.base, apiKey: u.apiKey,
-      weight: u.weight, forceStream: u.forceStream, enabled: u.enabled,
-      priority: u.priority, sameRetries: u.sameRetries, sameRetryBackoffMs: u.sameRetryBackoffMs,
-      modelMap: u.modelMap || {}
-    })), null, 2);
-    document.getElementById('export-csv').value = toExportCSV(_exportCache);
+    renderExportChecks();
+    refreshExportText();
   } catch (e) {
     document.getElementById('export-json').value = '加载失败: ' + e.message;
+    document.getElementById('export-checks').innerHTML = '<div class="empty">加载失败</div>';
     toast('导出加载失败', 'error');
   }
+}
+// 渲染导出渠道勾选区
+function renderExportChecks() {
+  const el = document.getElementById('export-checks');
+  if (!_exportCache.length) { el.innerHTML = '<div class="empty">无上游</div>'; return; }
+  el.innerHTML = _exportCache.map(u => {
+    const checked = _exportSel.has(u.name) ? 'checked' : '';
+    return `<label class="ec-row"><input type="checkbox" data-export-name="${esc(u.name)}" ${checked} onchange="onExportCheckChange()">
+      <span class="ec-name">${esc(u.name)}</span>
+      <span class="badge badge-type">${u.type}</span>
+      <span class="badge ${u.enabled ? 'badge-on' : 'badge-off'}">${u.enabled ? '启用' : '禁用'}</span>
+    </label>`;
+  }).join('');
+  updateExportCount();
+}
+function onExportCheckChange() {
+  _exportSel = new Set();
+  document.querySelectorAll('#export-checks input[type=checkbox]').forEach(cb => {
+    if (cb.checked) _exportSel.add(cb.dataset.exportName);
+  });
+  updateExportCount();
+  refreshExportText();
+}
+function exportSelectAll(on) {
+  _exportSel = new Set(on ? _exportCache.map(u => u.name) : []);
+  document.querySelectorAll('#export-checks input[type=checkbox]').forEach(cb => { cb.checked = on; });
+  updateExportCount();
+  refreshExportText();
+}
+function updateExportCount() {
+  document.getElementById('export-selected-count').textContent = `已选 ${_exportSel.size} / 共 ${_exportCache.length}`;
+}
+// 按勾选过滤后的导出数据
+function getExportList() {
+  return _exportCache.filter(u => _exportSel.has(u.name));
+}
+// 根据当前勾选重新生成 JSON/CSV 文本（勾选变化时实时刷新两个文本框）
+function refreshExportText() {
+  const list = getExportList();
+  document.getElementById('export-json').value = JSON.stringify(list.map(u => ({
+    name: u.name, type: u.type, base: u.base, apiKey: u.apiKey,
+    weight: u.weight, forceStream: u.forceStream, enabled: u.enabled,
+    priority: u.priority, sameRetries: u.sameRetries, sameRetryBackoffMs: u.sameRetryBackoffMs,
+    modelMap: u.modelMap || {}
+  })), null, 2);
+  document.getElementById('export-csv').value = toExportCSV(list);
 }
 function currentExportText() {
   const tab = document.querySelector('#export-modal .tab.active').dataset.tab;
@@ -686,11 +763,13 @@ function currentExportText() {
   return { text: el.value, ext: tab === 'exp-json' ? 'json' : 'csv' };
 }
 async function copyExport() {
+  if (_exportSel.size === 0) { toast('未选择任何渠道', 'error'); return; }
   const { text } = currentExportText();
-  try { await navigator.clipboard.writeText(text); toast('已复制到剪贴板'); }
+  try { await navigator.clipboard.writeText(text); toast(`已复制 ${_exportSel.size} 个渠道`); }
   catch { toast('复制失败，请手动选择文本', 'error'); }
 }
 function downloadExport() {
+  if (_exportSel.size === 0) { toast('未选择任何渠道', 'error'); return; }
   const { text, ext } = currentExportText();
   const blob = new Blob([text], { type: ext === 'json' ? 'application/json' : 'text/csv' });
   const url = URL.createObjectURL(blob);

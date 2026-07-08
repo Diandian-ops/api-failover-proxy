@@ -1,100 +1,32 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>API Failover Proxy · 运行监控</title>
-<style>
-  :root {
-    --bg: #0f172a; --surface: #1e293b; --surface2: #273549;
-    --border: #334155; --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
-    --primary: #60a5fa; --green: #22c55e; --red: #ef4444; --yellow: #fbbf24;
-    --green-bg: #064e3b; --red-bg: #7f1d1d; --yellow-bg: #78350f;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "PingFang SC", "SF Pro Text", sans-serif; background: var(--bg); color: var(--text); padding: 24px; max-width: 1200px; margin: 0 auto; }
-  h1 { font-size: 20px; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
-  .subtitle { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
-
-  /* 顶部状态栏 */
-  .top-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; padding: 16px 20px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); }
-  .top-bar .logo { font-size: 22px; font-weight: 700; color: #f8fafc; }
-  .top-bar .logo span { color: var(--primary); }
-  .top-tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; }
-  .tag-ok { background: var(--green-bg); color: #6ee7b7; }
-  .tag-warn { background: var(--yellow-bg); color: #fcd34d; }
-  .tag-err { background: var(--red-bg); color: #fca5a5; }
-  .top-meta { font-size: 12px; color: var(--text3); margin-left: auto; display: flex; gap: 16px; }
-  .top-meta span { white-space: nowrap; }
-
-  /* 导航 */
-  .nav { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-  .nav a { color: var(--primary); text-decoration: none; font-size: 13px; font-weight: 500; }
-  .nav a:hover { text-decoration: underline; }
-  .toggle-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text3); margin-left: auto; cursor: pointer; }
-  .toggle-auto input { accent-color: var(--primary); }
-
-  /* 统计卡片 */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border-radius: 10px; padding: 16px 18px; border: 1px solid var(--border); }
-  .stat-card .num { font-size: 22px; font-weight: 700; font-family: "SF Mono", "Menlo", monospace; line-height: 1.2; }
-  .stat-card .label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }
-  .c-green { color: #6ee7b7; } .c-red { color: #fca5a5; } .c-yellow { color: #fcd34d; } .c-blue { color: #93c5fd; } .c-white { color: #f8fafc; }
-
-  /* 内容网格 */
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
-  .card { background: var(--surface); border-radius: 10px; padding: 18px 20px; border: 1px solid var(--border); }
-  .card-full { grid-column: 1 / -1; }
-  .card h2 { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
-
-  /* 上游状态卡片 */
-  .upstream-list { display: flex; flex-direction: column; gap: 10px; }
-  .upstream-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; background: var(--surface2); }
-  .upstream-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .dot-ok { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.5); }
-  .dot-open { background: var(--yellow); box-shadow: 0 0 6px rgba(251,191,36,0.5); }
-  .dot-off { background: var(--text3); }
-  .upstream-info { flex: 1; min-width: 0; }
-  .upstream-name { font-weight: 600; font-size: 14px; }
-  .upstream-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
-  .upstream-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
-
-  /* 最近请求 */
-  .current-req { padding: 12px 16px; border-radius: 8px; background: var(--surface2); }
-  .current-req .channel { font-size: 16px; font-weight: 600; }
-  .current-req .detail { font-size: 12px; color: var(--text3); margin-top: 6px; }
-  .pulsing-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; margin-right: 6px; }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
-
-  /* 表格 */
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--border); }
-  th { color: var(--text3); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-  tr:hover { background: var(--surface2); }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-  .badge-ok { background: var(--green-bg); color: #6ee7b7; }
-  .badge-fail { background: var(--red-bg); color: #fca5a5; }
-  .badge-open { background: var(--yellow-bg); color: #fcd34d; }
-  .badge-closed { background: var(--green-bg); color: #6ee7b7; }
-  .badge-type { background: #1e3a8a; color: #93c5fd; }
-  .empty { text-align: center; padding: 24px; color: var(--text3); font-size: 13px; }
-  .num { font-family: "SF Mono", "Menlo", monospace; }
-  .scroll { max-height: 360px; overflow-y: auto; }
-  .scroll::-webkit-scrollbar { width: 4px; } .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-</style>
+<link rel="stylesheet" href="/shared.css">
+<script>
+  // 主题：加载前应用避免闪烁
+  const _t = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', _t);
+</script>
 </head>
 <body>
 
-<div class="top-bar" id="top-bar">
-  <div class="logo">API <span>Failover</span> Proxy</div>
-  <div id="top-tags"></div>
-  <div class="top-meta" id="top-meta"></div>
+<div class="topbar">
+  <div class="brand">API <span>Failover</span> Proxy</div>
+  <nav class="nav">
+    <a href="/admin">🔧 号池管理</a>
+    <a href="/monitor" class="current">📊 运行监控</a>
+  </nav>
+  <div class="nav-spacer"></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换深浅色"><span id="theme-icon">🌙</span></button>
 </div>
 
-<div class="nav">
-  <a href="/admin">🔧 号池管理</a>
-  <a href="/monitor">📊 运行监控</a>
+<h1>运行监控</h1>
+<div class="subtitle">实时渠道状态、用量统计、缓存命中、熔断状态</div>
+
+<div style="margin-bottom:20px">
   <label class="toggle-auto"><input type="checkbox" id="autoRefresh" checked> 自动刷新（5s）</label>
 </div>
 
@@ -114,25 +46,27 @@
   </div>
 
   <!-- 用量明细 -->
-  <div class="card">
+  <div class="card card-full">
     <h2>📋 用量明细（按上游×模型）</h2>
     <div id="usage" class="scroll"><div class="empty">加载中...</div></div>
-  </div>
-
-  <!-- 熔断状态 -->
-  <div class="card">
-    <h2>⚡ 熔断器</h2>
-    <div id="breakers"><div class="empty">加载中...</div></div>
-  </div>
-
-  <!-- 最近请求表 -->
-  <div class="card card-full">
-    <h2>🕒 最近请求（最新 50 条）</h2>
-    <div id="recent" class="scroll"><div class="empty">加载中...</div></div>
   </div>
 </div>
 
 <script>
+// 主题切换：深浅色，localStorage 记住
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('theme-icon').textContent = next === 'dark' ? '🌙' : '☀';
+}
+(function initThemeIcon() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const el = document.getElementById('theme-icon');
+  if (el) el.textContent = cur === 'dark' ? '🌙' : '☀';
+})();
+
 const GATEWAY_KEY = localStorage.getItem('gatewayKey') || 'sk-1234567890';
 function headers() { return { 'Authorization': `Bearer ${GATEWAY_KEY}` }; }
 function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
@@ -143,7 +77,11 @@ function fmtTime(ts) {
 }
 function fmtAgo(ts) {
   if (!ts) return '-';
-  const diff = Math.floor((Date.now() - (ts > 1e12 ? ts : ts)) / 1000);
+  // timestamp 可能是 ISO 字符串（recent-requests）或毫秒数字（last-upstream），统一转毫秒
+  const t = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  if (isNaN(t)) return '-';
+  const diff = Math.floor((Date.now() - t) / 1000);
+  if (diff < 0) return '刚刚';
   if (diff < 60) return diff + 's 前';
   if (diff < 3600) return Math.floor(diff/60) + 'm 前';
   return Math.floor(diff/3600) + 'h 前';
@@ -167,49 +105,27 @@ function fmtUptime(s) {
   return h + 'h ' + m + 'm';
 }
 
-/* 顶部状态栏 */
-async function loadTopBar() {
-  try {
-    const [hr, rr] = await Promise.all([
-      fetch('/health').then(r=>r.json()),
-      fetch('/monitor/recent-requests?limit=200', {headers:headers()}).then(r=>r.json())
-    ]);
-    const today = new Date().toISOString().slice(0,10);
-    const todayReqs = (rr.requests||[]).filter(x=>(x.timestamp||'').startsWith(today));
-    const fail = todayReqs.filter(x=>!x.success).length;
-    const total = todayReqs.length;
-
-    // tags
-    const tagsEl = document.getElementById('top-tags');
-    let tags = `<span class="top-tag ${fail > 0 ? 'tag-warn' : 'tag-ok'}">${fail > 0 ? '⚠ ' + fail + ' 失败' : '✓ 正常'}</span>`;
-    tags += `<span class="top-tag tag-ok">v${hr.version||'?'}</span>`;
-    tagsEl.innerHTML = tags;
-
-    // meta
-    const metaEl = document.getElementById('top-meta');
-    metaEl.innerHTML = `
-      <span>运行 ${fmtUptime(hr.uptime)}</span>
-      <span>上游 ${hr.upstreams?.length||0}</span>
-    `;
-  } catch(e) {}
-}
-
-/* 统计卡片 */
+/* 统计卡片：today-stats + health 合并，单一写入 #stats 避免竞态 */
 async function loadStats() {
   try {
-    const r = await fetch('/monitor/today-stats', {headers:headers()});
-    const d = await r.json();
-    if (!d.ok) throw new Error('fetch failed');
+    const [r, hr] = await Promise.all([
+      fetch('/monitor/today-stats', {headers:headers()}).then(r=>r.json()),
+      fetch('/health').then(r=>r.json())
+    ]);
+    if (!r.ok) throw new Error('fetch failed');
+    const ups = hr.upstreams?.length || 0;
     document.getElementById('stats').innerHTML = `
-      <div class="stat-card"><div class="num c-white">${d.total}</div><div class="label">今日请求</div></div>
-      <div class="stat-card"><div class="num c-green">${d.ok}</div><div class="label">成功</div></div>
-      <div class="stat-card"><div class="num c-red">${d.fail}</div><div class="label">失败</div></div>
-      <div class="stat-card"><div class="num c-blue">${d.rate}%</div><div class="label">成功率</div></div>
-      <div class="stat-card"><div class="num c-white">${fmtDuration(d.avgDuration)}</div><div class="label">平均耗时</div></div>
-      <div class="stat-card"><div class="num c-yellow">${fmtNum(d.inputTokens)}</div><div class="label">输入 tokens</div></div>
-      <div class="stat-card"><div class="num c-blue">${fmtNum(d.outputTokens)}</div><div class="label">输出 tokens</div></div>
-      <div class="stat-card"><div class="num c-green">${fmtNum(d.cacheReadTokens||0)}</div><div class="label">缓存命中 tok</div></div>
-      <div class="stat-card"><div class="num ${d.savedTokens>0?'c-green':'c-yellow'}">${fmtNum(d.savedTokens||0)}</div><div class="label">估算节省 tok</div></div>
+      <div class="stat-card"><div class="num c-white">${r.total}</div><div class="label">今日请求</div></div>
+      <div class="stat-card"><div class="num c-green">${r.ok}</div><div class="label">成功</div></div>
+      <div class="stat-card"><div class="num c-red">${r.fail}</div><div class="label">失败</div></div>
+      <div class="stat-card"><div class="num c-blue">${r.rate}%</div><div class="label">成功率</div></div>
+      <div class="stat-card"><div class="num c-white">${fmtDuration(r.avgDuration)}</div><div class="label">平均耗时</div></div>
+      <div class="stat-card"><div class="num c-yellow">${fmtNum(r.inputTokens)}</div><div class="label">输入 tokens</div></div>
+      <div class="stat-card"><div class="num c-blue">${fmtNum(r.outputTokens)}</div><div class="label">输出 tokens</div></div>
+      <div class="stat-card"><div class="num c-green">${fmtNum(r.cacheReadTokens||0)}</div><div class="label">缓存命中 tok</div></div>
+      <div class="stat-card"><div class="num ${(r.savedTokens||0)>0?'c-green':'c-yellow'}">${fmtNum(r.savedTokens||0)}</div><div class="label">估算节省 tok</div></div>
+      <div class="stat-card"><div class="num c-white">${fmtUptime(hr.uptime)}</div><div class="label">运行时长</div></div>
+      <div class="stat-card"><div class="num c-yellow">${ups}</div><div class="label">上游数量</div></div>
     `;
   } catch(e) { document.getElementById('stats').innerHTML = '<div class="empty">加载失败</div>'; }
 }
@@ -260,23 +176,6 @@ async function loadCurrent() {
   } catch(e) { document.getElementById('current-channel').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
-/* 熔断器 */
-async function loadBreakers() {
-  try {
-    const r = await fetch('/monitor/breakers', {headers:headers()});
-    const d = await r.json();
-    const bs = d.breakers || [];
-    if (!bs.length) { document.getElementById('breakers').innerHTML = '<div class="empty">无熔断记录（所有上游正常）</div>'; return; }
-    let html = '<table><thead><tr><th>上游</th><th>连续失败</th><th>阈值</th><th>状态</th><th>冷却</th></tr></thead><tbody>';
-    bs.forEach(b => {
-      const st = b.open ? '<span class="badge badge-open">熔断中</span>' : '<span class="badge badge-closed">正常</span>';
-      html += `<tr><td><strong>${esc(b.name)}</strong></td><td class="num">${b.fails}</td><td class="num">${b.failThreshold}</td><td>${st}</td><td>${b.cooldownRemaining>0?b.cooldownRemaining+'s':'-'}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    document.getElementById('breakers').innerHTML = html;
-  } catch(e) { document.getElementById('breakers').innerHTML = '<div class="empty">加载失败</div>'; }
-}
-
 /* 用量明细 */
 async function loadUsage() {
   try {
@@ -287,7 +186,7 @@ async function loadUsage() {
     let html = '<table><thead><tr><th>日期</th><th>上游</th><th>模型</th><th>请求</th><th>失败</th><th>输入tok</th><th>输出tok</th><th>缓存命中</th></tr></thead><tbody>';
     rows.forEach(r => {
       const cacheHit = r.cacheReadTokens || 0;
-      const hitBadge = cacheHit > 0 ? `<span class="badge badge-ok">${fmtNum(cacheHit)}</span>` : '<span style="color:var(--text3)">-</span>';
+      const hitBadge = cacheHit > 0 ? `<span class="badge badge-ok">${fmtNum(cacheHit)}</span>` : '-';
       html += `<tr><td>${r.date}</td><td><strong>${esc(r.upstream)}</strong></td><td style="font-size:11px">${esc(r.model)}</td><td class="num">${r.requests}</td><td class="num">${r.fails}</td><td class="num">${fmtNum(r.inputTokens||0)}</td><td class="num">${fmtNum(r.outputTokens||0)}</td><td class="num">${hitBadge}</td></tr>`;
     });
     html += '</tbody></table>';
@@ -296,25 +195,7 @@ async function loadUsage() {
 }
 
 /* 最近请求表 */
-async function loadRecent() {
-  try {
-    const r = await fetch('/monitor/recent-requests?limit=50', {headers:headers()});
-    const d = await r.json();
-    const reqs = d.requests || [];
-    if (!reqs.length) { document.getElementById('recent').innerHTML = '<div class="empty">无请求记录</div>'; return; }
-    let html = '<table><thead><tr><th>时间</th><th>上游</th><th>类型</th><th>模型</th><th>状态</th><th>耗时</th><th>输入tok</th><th>输出tok</th><th>缓存</th></tr></thead><tbody>';
-    reqs.forEach(r => {
-      const st = r.success ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-fail">失败</span>';
-      const rowBg = r.success ? '' : 'style="background:rgba(239,68,68,0.05)"';
-      const cache = r.cacheReadTokens > 0 ? `<span class="badge badge-ok">${fmtNum(r.cacheReadTokens)}</span>` : '-';
-      html += `<tr ${rowBg}><td style="font-size:11px">${fmtAgo(r.timestamp)}</td><td><strong>${esc(r.upstream)}</strong></td><td><span class="badge badge-type">${esc(r.upstreamType)}</span></td><td style="font-size:11px">${esc(r.model)}</td><td>${st}</td><td class="num">${fmtDuration(r.duration)}</td><td class="num">${r.inputTokens||0}</td><td class="num">${r.outputTokens||0}</td><td class="num">${cache}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    document.getElementById('recent').innerHTML = html;
-  } catch(e) { document.getElementById('recent').innerHTML = '<div class="empty">加载失败</div>'; }
-}
-
-function loadAll() { loadTopBar(); loadStats(); loadUpstreams(); loadCurrent(); loadBreakers(); loadUsage(); loadRecent(); }
+function loadAll() { loadStats(); loadUpstreams(); loadCurrent(); loadUsage(); }
 loadAll();
 let timer = null;
 function setupAuto() {
