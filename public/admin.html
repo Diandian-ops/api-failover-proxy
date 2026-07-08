@@ -287,9 +287,11 @@ function renderTable(upstreams) {
       <td class="model-map-cell" title="${esc(mm)}">${esc(mm)}</td>
       <td>${flags.join('')}</td>
       <td>
-        <button class="btn btn-warning btn-sm" onclick="editUpstream('${esc(u.name)}')">编辑</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
+        <div class="row-actions">
+          <button class="btn btn-warning btn-sm" onclick="editUpstream('${esc(u.name)}')">编辑</button>
+          <button class="btn btn-secondary btn-sm" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
+        </div>
       </td>
     </tr>`;
   });

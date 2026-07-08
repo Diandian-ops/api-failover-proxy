@@ -242,6 +242,10 @@ tr.drag-over td { border-top: 2px solid var(--primary) !important; }
 .seq { font-family: "SF Mono", "Menlo", monospace; color: var(--text3); font-size: 12px; }
 .row-check { text-align: center; width: 36px; }
 
+/* ── 操作列按钮横排（admin）── */
+.row-actions { display: flex; gap: 4px; flex-wrap: nowrap; }
+.row-actions .btn { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+
 /* ── 导出渠道勾选区（admin）── */
 .export-checks { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 12px; }
 .export-checks .ec-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }

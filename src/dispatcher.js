@@ -230,6 +230,24 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
         // ── 非流式 JSON ──
         const json = await readJSON(response)
 
+        // 空响应/畸形响应检测：上游返回 200 但 body 为空或非 JSON，
+        // 视为上游异常，重试/切上游而不是把空响应转发给客户端
+        if (!json || (json._raw !== undefined && !json._raw)) {
+          log.warn(`[dispatch] ${upstream.name} 返回 200 但响应体为空，视为畸形响应`)
+          lastStatus = 502
+          lastErr = new Error(`upstream ${upstream.name} returned empty body (HTTP 200)`)
+          logUsage2(upstream, originalModel, false, {}, startTime)
+          if (sr >= sameRetries) {
+            attempted.push({ upstream: upstream.name, status: 502, error: 'empty response body' })
+            breaker.recordFail(upstream.name)
+          }
+          if (sr < sameRetries) {
+            await sleep(sameBackoff)
+            continue
+          }
+          break
+        }
+
         // 协议转换：响应体转换
         let outJson = json
         if (convert) {

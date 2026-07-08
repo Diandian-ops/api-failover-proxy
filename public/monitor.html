@@ -33,15 +33,9 @@
 <div class="stats" id="stats"></div>
 
 <div class="grid">
-  <!-- 上游状态 -->
-  <div class="card">
-    <h2>🛡️ 上游状态</h2>
-    <div id="upstreams" class="upstream-list"><div class="empty">加载中...</div></div>
-  </div>
-
-  <!-- 最近一次请求 -->
-  <div class="card">
-    <h2>🎯 最近请求</h2>
+  <!-- 最近请求（含上游聚合状态）-->
+  <div class="card card-full">
+    <h2>🎯 最近请求 <span id="upstream-summary" style="float:right;font-size:12px;font-weight:500;text-transform:none;letter-spacing:0"></span></h2>
     <div id="current-channel"><div class="empty">加载中...</div></div>
   </div>
 
@@ -130,7 +124,7 @@ async function loadStats() {
   } catch(e) { document.getElementById('stats').innerHTML = '<div class="empty">加载失败</div>'; }
 }
 
-/* 上游状态 */
+/* 上游状态：聚合为摘要，渲染到最近请求卡片标题右侧 */
 async function loadUpstreams() {
   try {
     const [hr, br] = await Promise.all([
@@ -140,25 +134,21 @@ async function loadUpstreams() {
     const ups = hr.upstreams || [];
     const bMap = {};
     (br.breakers||[]).forEach(b => bMap[b.name] = b);
-    if (!ups.length) { document.getElementById('upstreams').innerHTML = '<div class="empty">无上游</div>'; return; }
-    document.getElementById('upstreams').innerHTML = ups.map(u => {
+    const el = document.getElementById('upstream-summary');
+    if (!el) return;
+    if (!ups.length) { el.innerHTML = '<span style="color:var(--text3)">无上游</span>'; return; }
+    let online = 0, open = 0;
+    const openNames = [];
+    ups.forEach(u => {
       const b = bMap[u.name];
-      const open = b && b.open;
-      const dotCls = open ? 'dot-open' : 'dot-ok';
-      const badge = open
-        ? `<span class="upstream-badge badge-open">熔断 ${b.cooldownRemaining}s</span>`
-        : `<span class="upstream-badge badge-closed">在线</span>`;
-      const fails = b ? `${b.fails}/${b.failThreshold}` : '0/5';
-      return `<div class="upstream-item">
-        <div class="upstream-dot ${dotCls}"></div>
-        <div class="upstream-info">
-          <div class="upstream-name">${esc(u.name)}</div>
-          <div class="upstream-meta">${esc(u.type)} · 失败 ${fails}</div>
-        </div>
-        ${badge}
-      </div>`;
-    }).join('');
-  } catch(e) { document.getElementById('upstreams').innerHTML = '<div class="empty">加载失败</div>'; }
+      if (b && b.open) { open++; openNames.push(u.name); }
+      else online++;
+    });
+    const parts = [];
+    if (online) parts.push(`<span class="badge badge-closed">${online} 在线</span>`);
+    if (open) parts.push(`<span class="badge badge-open" title="${esc(openNames.join(', '))}">${open} 熔断</span>`);
+    el.innerHTML = parts.join(' ');
+  } catch(e) { const el = document.getElementById('upstream-summary'); if (el) el.innerHTML = '<span style="color:var(--text3)">加载失败</span>'; }
 }
 
 /* 最近一次请求 */
