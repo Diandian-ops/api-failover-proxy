@@ -63,6 +63,7 @@
   <div class="actions">
     <button class="btn-primary" onclick="openAddModal()">+ 新增上游</button>
     <button class="btn-primary" onclick="openImportModal()">📥 批量导入</button>
+    <button class="btn-secondary" onclick="openExportModal()">📤 导出号池</button>
     <button class="btn-success" onclick="reloadPool()">⟳ 热加载</button>
     <button class="btn-secondary" onclick="loadUpstreams()">刷新列表</button>
   </div>
@@ -176,6 +177,31 @@
       <button class="btn-secondary" onclick="closeImportModal()">取消</button>
       <button class="btn-warning" onclick="previewImport()">预览</button>
       <button class="btn-primary" onclick="doImport()">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导出号池模态框 -->
+<div class="modal-overlay" id="export-modal">
+  <div class="modal" style="width:680px">
+    <h2>📤 导出号池</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="exp-json" onclick="switchExportTab('exp-json')">JSON</div>
+      <div class="tab" data-tab="exp-csv" onclick="switchExportTab('exp-csv')">CSV</div>
+    </div>
+    <div class="hint" id="export-summary" style="margin-bottom:8px"></div>
+    <div class="tab-pane" id="pane-exp-json">
+      <textarea id="export-json" rows="14" class="import-ta" readonly></textarea>
+      <div class="hint" style="margin-top:4px">完整号池的 JSON 数组，可直接用于批量导入</div>
+    </div>
+    <div class="tab-pane" id="pane-exp-csv" style="display:none">
+      <textarea id="export-csv" rows="14" class="import-ta" readonly></textarea>
+      <div class="hint" style="margin-top:4px">含表头的 CSV；modelMap 列为 JSON 字符串，可直接粘回 CSV 导入</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeExportModal()">关闭</button>
+      <button class="btn-warning" onclick="copyExport()">📋 复制</button>
+      <button class="btn-primary" onclick="downloadExport()">⬇ 下载文件</button>
     </div>
   </div>
 </div>
@@ -554,6 +580,79 @@ function loadCsvFile(ev) {
 }
 function fillCsvTemplate() {
   document.getElementById('import-csv').value = 'name,type,base,apiKey,weight,forceStream,enabled,priority,sameRetries,sameRetryBackoffMs,modelMap\nupstream1,anthropic,https://api1.example.com/v1,sk-key1,1,false,true,100,2,800,"{""claude-3-5-sonnet"":""model-a""}"\nupstream2,openai,https://api2.example.com/v1,sk-key2,3,true,true,100,2,800,';
+}
+
+// ===== 导出号池 =====
+let _exportCache = [];  // 缓存导出数据，供复制/下载复用
+function closeExportModal() {
+  document.getElementById('export-modal').classList.remove('show');
+}
+function switchExportTab(t) {
+  document.querySelectorAll('#export-modal .tab').forEach(el => el.classList.toggle('active', el.dataset.tab === t));
+  document.getElementById('pane-exp-json').style.display = t === 'exp-json' ? 'block' : 'none';
+  document.getElementById('pane-exp-csv').style.display = t === 'exp-csv' ? 'block' : 'none';
+}
+// CSV 字段转义：含逗号/换行/双引号则加引号包裹，内部双引号转义为两遍
+function csvField(v) {
+  const s = String(v == null ? '' : v);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function toExportCSV(list) {
+  const cols = ['name','type','base','apiKey','weight','forceStream','enabled','priority','sameRetries','sameRetryBackoffMs','modelMap'];
+  const lines = [cols.join(',')];
+  for (const u of list) {
+    const mm = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap) : '';
+    lines.push(cols.map(c => csvField(
+      c === 'forceStream' ? (u[c] ? 'true' : 'false') :
+      c === 'enabled' ? (u[c] === false || u[c] === 0 ? 'false' : 'true') :
+      c === 'modelMap' ? mm : u[c]
+    )).join(','));
+  }
+  return lines.join('\n');
+}
+async function openExportModal() {
+  document.getElementById('export-modal').classList.add('show');
+  document.getElementById('export-json').value = '加载中...';
+  document.getElementById('export-csv').value = '';
+  document.getElementById('export-summary').textContent = '';
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams`, { headers: headers() });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    _exportCache = d.upstreams || [];
+    document.getElementById('export-summary').textContent = `共 ${_exportCache.length} 个上游（含禁用的）`;
+    document.getElementById('export-json').value = JSON.stringify(_exportCache.map(u => ({
+      name: u.name, type: u.type, base: u.base, apiKey: u.apiKey,
+      weight: u.weight, forceStream: u.forceStream, enabled: u.enabled,
+      priority: u.priority, sameRetries: u.sameRetries, sameRetryBackoffMs: u.sameRetryBackoffMs,
+      modelMap: u.modelMap || {}
+    })), null, 2);
+    document.getElementById('export-csv').value = toExportCSV(_exportCache);
+  } catch (e) {
+    document.getElementById('export-json').value = '加载失败: ' + e.message;
+    toast('导出加载失败', 'error');
+  }
+}
+function currentExportText() {
+  const tab = document.querySelector('#export-modal .tab.active').dataset.tab;
+  const el = tab === 'exp-json' ? document.getElementById('export-json') : document.getElementById('export-csv');
+  return { text: el.value, ext: tab === 'exp-json' ? 'json' : 'csv' };
+}
+async function copyExport() {
+  const { text } = currentExportText();
+  try { await navigator.clipboard.writeText(text); toast('已复制到剪贴板'); }
+  catch { toast('复制失败，请手动选择文本', 'error'); }
+}
+function downloadExport() {
+  const { text, ext } = currentExportText();
+  const blob = new Blob([text], { type: ext === 'json' ? 'application/json' : 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `upstreams-${new Date().toISOString().slice(0,10)}.${ext}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 </script>
 </body>
