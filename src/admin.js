@@ -31,6 +31,9 @@ function applyReload(app) {
   app.locals.config.upstreams = fresh
   log.info(`[admin] 热加载完成，上游数量: ${fresh.length}`)
   fresh.forEach(u => log.info(`  - ${u.name} (${u.type}) -> ${u.base}`))
+  // 同步重启健康探测，让新上游立即纳入探测、旧上游不再被探测
+  const hp = app.locals.healthProbe
+  if (hp) hp.restart(app.locals.config)
   return { ok: true, count: fresh.length, skipped: false }
 }
 

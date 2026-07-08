@@ -57,6 +57,12 @@ export default {
     maxQueue: 100          // queue 策略下最大排队数（reject 策略忽略）
   },
 
+  // 用量日志：记录每次请求到 logs/requests-*.jsonl，供 /usage、/today-stats 等监控端点读取
+  // 关闭后监控端点将为空，但代理功能不受影响
+  usageLog: {
+    enabled: true
+  },
+
   // 上游 API 列表 —— 按顺序尝试，前面的失败后自动切到后面的
   // type: 'openai'    -> 转发到 {base}/chat/completions
   // type: 'anthropic' -> 转发到 {base}/messages

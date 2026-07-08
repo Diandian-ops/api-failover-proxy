@@ -32,15 +32,23 @@ app.get('/shared.css', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'shared.css'))
 })
 // 健康检查免鉴权，供 Docker healthcheck / 监控探测
-// liveness：进程存活即 ok，附带版本/运行时间/上游/熔断状态
+// liveness：进程存活即 ok，附带版本/运行时间/上游/熔断/限流/内存状态
 app.get('/health', (req, res) => {
   const breaker = req.app.locals.breaker
+  const rl = req.app.locals.rateLimiter
+  const mem = process.memoryUsage()
   res.json({
     ok: true,
     version,
     uptime: Math.round(process.uptime()),
     upstreams: config.upstreams.map(u => ({ name: u.name, type: u.type })),
-    breakers: breaker ? breaker.snapshot() : []
+    breakers: breaker ? breaker.snapshot() : [],
+    rateLimit: rl ? { enabled: rl.enabled, maxConcurrent: rl.maxConcurrent, upstreams: rl.snapshot() } : null,
+    memory: {
+      rssMB: Math.round(mem.rss / 1048576),
+      heapUsedMB: Math.round(mem.heapUsed / 1048576),
+      heapTotalMB: Math.round(mem.heapTotal / 1048576)
+    }
   })
 })
 
@@ -50,8 +58,8 @@ app.get('/ready', (req, res) => {
   if (!config.upstreams || config.upstreams.length === 0) {
     return res.status(503).json({ ready: false, reason: '无可用上游' })
   }
-  // 是否所有上游都被熔断
-  const allOpen = config.upstreams.every(u => breaker && breaker.isOpen(u.name))
+  // 是否所有上游都被熔断（用纯读 peekOpen，避免 /ready 轮询触发半开转换）
+  const allOpen = config.upstreams.every(u => breaker && breaker.peekOpen(u.name))
   if (allOpen) {
     return res.status(503).json({ ready: false, reason: '所有上游均熔断' })
   }
@@ -95,8 +103,6 @@ app.use((req, res, next) => {
   }
   next()
 })
-
-// 健康检查（已移到鉴权中间件之前，此处删除）
 
 // 用量统计
 app.get('/usage', (req, res) => {
@@ -171,6 +177,16 @@ const server = app.listen(config.port, config.host, () => {
   } catch (e) {
     log.warn(`日志清理失败（不影响启动）: ${e.message}`)
   }
+  // 定时清理（每 24h），避免常驻进程日志无限累积
+  const retentionTimer = setInterval(() => {
+    try {
+      const removed = cleanupOldLogs(config)
+      if (removed > 0) log.info(`[定时清理] 已清理 ${removed} 个过期日志文件`)
+    } catch (e) {
+      log.warn(`[定时清理] 日志清理失败: ${e.message}`)
+    }
+  }, 24 * 60 * 60 * 1000)
+  retentionTimer.unref?.()
   // 启动健康探测
   healthProbe.start()
   // 客户端配置同步默认不自动执行，由管理界面手动控制
@@ -195,6 +211,8 @@ function shutdown(signal) {
   log.info(`收到 ${signal}，停止接收新请求，等待在途请求完成...`)
   // 停止健康探测
   healthProbe.stop()
+  // 停止日志定时清理
+  clearInterval(retentionTimer)
   // 10s 超时强制退出兜底
   const forceTimer = setTimeout(() => {
     log.warn('优雅关闭超时，强制退出')

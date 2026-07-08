@@ -36,20 +36,17 @@ router.get('/usage', (req, res) => {
   }
 })
 
-// 今日统计：从所有请求日志聚合（不限制条数，真实总数）
+// 今日统计：只读当天请求日志，避免全量扫描历史文件
 router.get('/today-stats', (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10)
-    const files = fs.readdirSync(LOG_DIR)
-      .filter(f => f.startsWith('requests-'))
-      .sort().reverse()
+    const f = path.join(LOG_DIR, `requests-${today}.jsonl`)
     let total = 0, ok = 0, fail = 0, totalDur = 0, inTok = 0, outTok = 0, cacheRead = 0, cacheCreate = 0
-    for (const f of files) {
-      const lines = fs.readFileSync(path.join(LOG_DIR, f), 'utf8').split('\n').filter(Boolean)
+    try {
+      const lines = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean)
       for (const line of lines) {
         try {
           const e = JSON.parse(line)
-          if (!e.timestamp || !e.timestamp.startsWith(today)) continue
           total++
           if (e.success) ok++; else fail++
           totalDur += e.duration || 0
@@ -59,7 +56,7 @@ router.get('/today-stats', (req, res) => {
           cacheCreate += e.cacheCreationTokens || 0
         } catch {}
       }
-    }
+    } catch { /* 当天尚无请求文件 */ }
     const avg = total ? Math.round(totalDur / total) : 0
     const rate = total ? ((ok / total) * 100).toFixed(1) : '-'
     // 节省成本估算：命中部分按 0.1x（原 1x），即省 0.9x；写入按 1.25x（-0.25x）
@@ -71,6 +68,7 @@ router.get('/today-stats', (req, res) => {
 })
 
 // 最近 N 条请求记录（默认 50）
+// 从最新文件开始倒序读，凑够 limit 条即停，避免全量扫描
 router.get('/recent-requests', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 500)
   try {
@@ -97,6 +95,13 @@ router.get('/breakers', (req, res) => {
   const breaker = req.app.locals.breaker
   if (!breaker) return res.json({ ok: true, breakers: [] })
   res.json({ ok: true, breakers: breaker.snapshot() })
+})
+
+// 限流状态：各上游实时并发/排队数
+router.get('/rate-limit', (req, res) => {
+  const rl = req.app.locals.rateLimiter
+  if (!rl) return res.json({ ok: true, enabled: false, upstreams: [] })
+  res.json({ ok: true, enabled: rl.enabled, maxConcurrent: rl.maxConcurrent, strategy: rl.strategy, upstreams: rl.snapshot() })
 })
 
 export default router

@@ -9,6 +9,13 @@ export class CircuitBreaker {
     this.state = new Map()
   }
 
+  // 纯读：当前是否处于熔断（不触发半开转换），供 /ready、snapshot 等监控查询
+  peekOpen(name) {
+    const s = this.state.get(name)
+    if (!s) return false
+    return s.openUntil && Date.now() < s.openUntil
+  }
+
   isOpen(name) {
     const s = this.state.get(name)
     if (!s) return false
@@ -53,7 +60,7 @@ export class CircuitBreaker {
   snapshot() {
     const out = []
     for (const [name, s] of this.state.entries()) {
-      const open = s.openUntil && Date.now() < s.openUntil
+      const open = this.peekOpen(name)
       out.push({
         name,
         fails: s.fails || 0,

@@ -216,12 +216,14 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
                 attempted.push({ upstream: upstream.name, status: 502, error: 'empty stream' })
                 breaker.recordFail(upstream.name)
               }
+              rateLimiter.release(upstream.name)
               if (sr < sameRetries) {
                 await sleep(sameBackoff)
                 continue
               }
               break
             }
+            rateLimiter.release(upstream.name)
             throw e
           }
           const dur = Date.now() - startTime
@@ -248,6 +250,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
               attempted.push({ upstream: upstream.name, status: 502, error: 'empty aggregation' })
               breaker.recordFail(upstream.name)
             }
+            rateLimiter.release(upstream.name)
             if (sr < sameRetries) {
               await sleep(sameBackoff)
               continue
@@ -282,6 +285,7 @@ export async function dispatch(reqPath, req, res, config, breaker, rateLimiter) 
             attempted.push({ upstream: upstream.name, status: 502, error: isEmpty ? 'empty response body' : 'malformed JSON' })
             breaker.recordFail(upstream.name)
           }
+          rateLimiter.release(upstream.name)
           if (sr < sameRetries) {
             await sleep(sameBackoff)
             continue
