@@ -103,10 +103,13 @@ h1 { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 4px; 
 
 /* ── 表格 ── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--text3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 tr:hover { background: var(--surface2); }
 .num { font-family: "SF Mono", "Menlo", monospace; }
+/* 表格容器横向滚动：列多时不挤压换行 */
+.table-wrap { overflow-x: auto; }
+.table-wrap table { min-width: max-content; }
 .scroll { max-height: 380px; overflow-y: auto; }
 .scroll::-webkit-scrollbar { width: 5px; }
 .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -206,6 +209,9 @@ tr:hover { background: var(--surface2); }
 .api-key-cell { font-family: "SF Mono", "Menlo", monospace; font-size: 12px; color: var(--text2); }
 .model-map-cell { font-family: "SF Mono", "Menlo", monospace; font-size: 11px; color: var(--text2); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-wrap { max-height: 240px; overflow: auto; margin-top: 6px; }
+
+/* 真实模型预览区（编辑表单内）：badge 横排 */
+.real-model-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 22px; }
 
 /* ── 上游状态卡片（monitor 独有）── */
 .upstream-list { display: flex; flex-direction: column; gap: 10px; }

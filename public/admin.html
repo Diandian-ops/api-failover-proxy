@@ -41,6 +41,7 @@
     <button class="btn btn-primary" onclick="openImportModal()">📥 批量导入</button>
     <button class="btn btn-secondary" onclick="openExportModal()">📤 导出号池</button>
     <button class="btn btn-success" onclick="reloadPool()">⟳ 热加载</button>
+    <button class="btn btn-secondary" onclick="testAllUpstreams()">⚡ 测全部连通性</button>
     <button class="btn btn-secondary" onclick="loadUpstreams()">刷新列表</button>
   </div>
   <div id="upstream-list">
@@ -115,9 +116,10 @@
       </div>
     </div>
     <div class="form-group">
-      <label>ModelMap</label>
-      <textarea id="f-modelMap" placeholder='{"claude-3-5-sonnet":"glm-5.2","glm-5.2":"astron-code-latest"}' rows="3"></textarea>
-      <div class="hint">JSON 格式：请求模型名 → 上游实际模型名</div>
+      <label>ModelMap <span class="hint">（请求模型名 -> 上游真实模型名）</span></label>
+      <textarea id="f-modelMap" placeholder='{"claude-3-5-sonnet":"glm-5.2","claude-3-5-*":"astron-code-latest"}' rows="3" oninput="renderRealModelPreview()"></textarea>
+      <div class="hint">JSON 格式，key=客户端请求模型名，value=上游真实模型名；支持通配（如 claude-3-5-*）。下方实时预览真实模型：</div>
+      <div id="f-realModelPreview" class="real-model-preview"><span class="hint">（未配置）</span></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal()">取消</button>
@@ -263,12 +265,17 @@ function renderTable(upstreams) {
     document.getElementById('upstream-list').innerHTML = '<div class="empty">号池为空</div>';
     return;
   }
-  let html = `<table><thead><tr>
-    <th class="drag-handle" title="拖拽行排序">⠿</th><th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>重试</th><th>状态</th>
-    <th>Base URL</th><th>API Key</th><th>ModelMap</th><th>标记</th><th>操作</th>
+  let html = `<div class="table-wrap"><table><thead><tr>
+    <th class="drag-handle" title="拖拽行排序">⠿</th><th>#</th><th>名称</th><th>类型</th><th>优先级</th><th>权重</th><th>重试</th><th>状态</th><th>连通性</th>
+    <th>Base URL</th><th>API Key</th><th>真实模型</th><th>标记</th><th>操作</th>
   </tr></thead><tbody>`;
   upstreams.forEach((u, i) => {
     const mm = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap) : '';
+    const rm = realModels(u.modelMap);
+    // 真实模型徽章：hover 显示完整 modelMap
+    const realModelHtml = rm.length
+      ? rm.map(m => `<span class="badge badge-type" title="${esc(mm)}">${esc(m)}</span>`).join(' ')
+      : '<span class="hint">（原样转发）</span>';
     const flags = [];
     if (u.forceStream) flags.push('<span class="badge badge-flag">forceStream</span>');
     // 序号：按 priority 升序后的位置（priority/10 取整，回退到 i+1）
@@ -282,20 +289,22 @@ function renderTable(upstreams) {
       <td class="num" title="仅 weighted 策略生效（当前 failover 按 priority 顺序）">${u.weight || 1}</td>
       <td class="num" style="font-size:11px">${u.sameRetries ?? 2}×/${u.sameRetryBackoffMs ?? 800}ms</td>
       <td><span class="badge ${u.enabled ? 'badge-on' : 'badge-off'}">${u.enabled ? '启用' : '禁用'}</span></td>
+      <td id="conn-${esc(u.name)}" class="conn-cell"><span class="badge" style="background:var(--surface2);color:var(--text3)">未测</span></td>
       <td style="font-size:11px">${esc(u.base)}</td>
       <td class="api-key-cell">${esc(u.apiKey.slice(0,12))}...</td>
-      <td class="model-map-cell" title="${esc(mm)}">${esc(mm)}</td>
+      <td class="model-map-cell">${realModelHtml}</td>
       <td>${flags.join('')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-warning btn-sm" onclick="editUpstream('${esc(u.name)}')">编辑</button>
           <button class="btn btn-secondary btn-sm" onclick="toggleUpstream('${esc(u.name)}', ${!u.enabled})">${u.enabled ? '禁用' : '启用'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="testUpstream('${esc(u.name)}')">测试</button>
           <button class="btn btn-danger btn-sm" onclick="deleteUpstream('${esc(u.name)}')">删除</button>
         </div>
       </td>
     </tr>`;
   });
-  html += '</tbody></table>';
+  html += '</tbody></table></div>';
   document.getElementById('upstream-list').innerHTML = html;
 }
 
@@ -351,6 +360,28 @@ async function reorderPool(names) {
 
 function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 
+// 从 modelMap 提取上游真实模型名（value 去重）
+// 如 {"claude-3-5-sonnet":"glm-5.2","glm-5.2":"astron-code-latest"} -> ["glm-5.2","astron-code-latest"]
+function realModels(modelMap) {
+  if (!modelMap || typeof modelMap !== 'object') return [];
+  const vals = Object.values(modelMap).filter(v => typeof v === 'string' && v);
+  return [...new Set(vals)];
+}
+
+// 编辑表单的"真实模型"实时预览：解析 textarea 里的 modelMap JSON，显示真实模型徽章
+function renderRealModelPreview() {
+  const el = document.getElementById('f-realModelPreview');
+  if (!el) return;
+  const txt = document.getElementById('f-modelMap').value.trim();
+  if (!txt) { el.innerHTML = '<span class="hint">（未配置，请求模型名原样转发）</span>'; return; }
+  let mm;
+  try { mm = JSON.parse(txt); }
+  catch { el.innerHTML = '<span class="badge badge-fail">JSON 格式错误</span>'; return; }
+  const rm = realModels(mm);
+  if (!rm.length) { el.innerHTML = '<span class="hint">（无 value）</span>'; return; }
+  el.innerHTML = rm.map(m => `<span class="badge badge-type">${esc(m)}</span>`).join(' ');
+}
+
 function openAddModal() {
   document.getElementById('modal-title').textContent = '新增上游';
   document.getElementById('f-original-name').value = '';
@@ -366,6 +397,7 @@ function openAddModal() {
   document.getElementById('f-sameRetries').value = '2';
   document.getElementById('f-sameRetryBackoffMs').value = '800';
   document.getElementById('f-modelMap').value = '';
+  renderRealModelPreview();
   document.getElementById('modal').classList.add('show');
 }
 
@@ -391,6 +423,7 @@ async function editUpstream(name) {
   document.getElementById('f-sameRetries').value = u.sameRetries ?? 2;
   document.getElementById('f-sameRetryBackoffMs').value = u.sameRetryBackoffMs ?? 800;
   document.getElementById('f-modelMap').value = u.modelMap && Object.keys(u.modelMap).length ? JSON.stringify(u.modelMap, null, 2) : '';
+  renderRealModelPreview();
   document.getElementById('modal').classList.add('show');
 }
 
@@ -472,6 +505,63 @@ async function reloadPool() {
     toast(`热加载成功，${d.count} 个上游`);
   } catch (e) {
     toast('热加载失败: ' + e.message, 'error');
+  }
+}
+
+// ===== 连通性测试（无副作用，不碰熔断器）=====
+// 单个/批量结果徽章渲染：conn-cell 内只放一个 badge
+// authOk 三态：true=连通(绿) / false=key失效(红) / null=无法验证(黄)
+function connBadge(result) {
+  if (!result) return '<span class="badge" style="background:var(--surface2);color:var(--text3)">未测</span>';
+  if (!result.reachable) {
+    // 网络不可达：黄色（不等于 key 失效）
+    const short = result.message.startsWith('超时') ? '超时' : '连接失败';
+    return `<span class="badge badge-open" title="${esc(result.message)}">⚠ ${short}</span>`;
+  }
+  if (result.authOk === true) {
+    return `<span class="badge badge-ok" title="${esc(result.message)}">✓ ${result.latencyMs}ms</span>`;
+  }
+  if (result.authOk === false) {
+    return `<span class="badge badge-fail" title="${esc(result.message)}">✗ key失效</span>`;
+  }
+  // authOk === null：网络通但 /models 不支持，无法验证 key
+  return `<span class="badge badge-open" title="${esc(result.message)}">~ ${result.latencyMs}ms</span>`;
+}
+function setConnCell(name, html) {
+  const el = document.getElementById(`conn-${name}`);
+  if (el) el.innerHTML = html;
+}
+function setConnTesting(name) {
+  setConnCell(name, '<span class="badge badge-open">测试中…</span>');
+}
+async function testUpstream(name) {
+  setConnTesting(name);
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/${encodeURIComponent(name)}/test`, { method: 'POST', headers: headers() });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || '测试失败');
+    setConnCell(name, connBadge(d));
+  } catch (e) {
+    setConnCell(name, `<span class="badge badge-fail" title="${esc(e.message)}">✗ 错误</span>`);
+    toast(`测试 ${name} 失败: ` + e.message, 'error');
+  }
+}
+async function testAllUpstreams() {
+  // 从当前表格收集所有上游名（按行顺序）
+  const names = Array.from(document.querySelectorAll('#upstream-list tbody tr')).map(tr => tr.dataset.name);
+  if (!names.length) { toast('号池为空', 'error'); return; }
+  names.forEach(setConnTesting);
+  try {
+    const r = await fetch(`${BASE}/admin/upstreams/test-all`, { method: 'POST', headers: headers() });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || '测试失败');
+    const map = new Map((d.results || []).map(x => [x.name, x]));
+    names.forEach(n => setConnCell(n, connBadge(map.get(n))));
+    const okCount = (d.results || []).filter(x => x.reachable && x.authOk).length;
+    toast(`测试完成：${okCount}/${d.count} 连通`);
+  } catch (e) {
+    names.forEach(n => setConnCell(n, `<span class="badge badge-fail" title="${esc(e.message)}">✗ 错误</span>`));
+    toast('批量测试失败: ' + e.message, 'error');
   }
 }
 
